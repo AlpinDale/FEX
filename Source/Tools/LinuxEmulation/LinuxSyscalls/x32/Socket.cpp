@@ -20,6 +20,9 @@ $end_info$
 #include <stddef.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
 
 ARG_TO_STR(FEX::HLE::x32::auto_compat_ptr<FEX::HLE::x32::mmsghdr_32>, "%lx")
 ARG_TO_STR(FEX::HLE::x32::auto_compat_ptr<void>, "%lx")

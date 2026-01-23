@@ -20,6 +20,9 @@ $end_info$
 #include <unistd.h>
 
 #include <time.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
 
 namespace FEXCore::Core {
 struct CpuStateFrame;
@@ -37,8 +40,14 @@ void CopySigInfo(FEXCore::x86::siginfo_t* Info, const siginfo_t& Host) {
   // Check si_code to determine how we need to interpret this
   if (Info->si_code == SI_TIMER) {
     // SI_TIMER means pid, uid, value
+#ifdef __APPLE__
+    // macOS siginfo_t doesn't have si_timerid/si_overrun
+    Info->_sifields._timer.tid = 0;
+    Info->_sifields._timer.overrun = 0;
+#else
     Info->_sifields._timer.tid = Host.si_timerid;
     Info->_sifields._timer.overrun = Host.si_overrun;
+#endif
     Info->_sifields._timer.sigval.sival_int = Host.si_value.sival_int;
   } else {
     // Now we need to copy over the more complex things
@@ -58,14 +67,27 @@ void CopySigInfo(FEXCore::x86::siginfo_t* Info, const siginfo_t& Host) {
       Info->_sifields._sigchld.pid = Host.si_pid;
       Info->_sifields._sigchld.uid = Host.si_uid;
       Info->_sifields._sigchld.status = Host.si_status;
+#ifdef __APPLE__
+      // macOS siginfo_t doesn't have si_utime/si_stime
+      Info->_sifields._sigchld.utime = 0;
+      Info->_sifields._sigchld.stime = 0;
+#else
       Info->_sifields._sigchld.utime = Host.si_utime;
       Info->_sifields._sigchld.stime = Host.si_stime;
+#endif
       break;
     case SIGALRM:
     case SIGVTALRM:
+#ifdef __APPLE__
+      // macOS siginfo_t doesn't have si_timerid/si_overrun/si_int
+      Info->_sifields._timer.tid = 0;
+      Info->_sifields._timer.overrun = 0;
+      Info->_sifields._timer.sigval.sival_int = Host.si_value.sival_int;
+#else
       Info->_sifields._timer.tid = Host.si_timerid;
       Info->_sifields._timer.overrun = Host.si_overrun;
       Info->_sifields._timer.sigval.sival_int = Host.si_int;
+#endif
       break;
     default: LogMan::Msg::EFmt("Unhandled siginfo_t for sigtimedwait: {}", Info->si_signo); break;
     }

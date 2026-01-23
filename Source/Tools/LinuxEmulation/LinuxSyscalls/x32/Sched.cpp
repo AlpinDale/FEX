@@ -14,6 +14,9 @@ $end_info$
 #include <sched.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
 
 namespace FEXCore::Core {
 struct CpuStateFrame;

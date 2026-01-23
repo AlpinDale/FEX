@@ -9,11 +9,20 @@
 #ifdef _WIN32
 #include <thread>
 #else
-#include <linux/limits.h>
+#include <FEXHeaderUtils/Platform.h>
 #endif
 
 namespace FEX::CPUInfo {
-#ifndef _WIN32
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+uint32_t CalculateNumberOfCPUs() {
+  int mib[2] = {CTL_HW, HW_NCPU};
+  int numCPUs = 1;
+  size_t len = sizeof(numCPUs);
+  sysctl(mib, 2, &numCPUs, &len, nullptr, 0);
+  return static_cast<uint32_t>(numCPUs);
+}
+#elif !defined(_WIN32)
 uint32_t CalculateNumberOfCPUs() {
   constexpr auto parse_string = FMT_COMPILE("/sys/devices/system/cpu/cpu{}");
   constexpr auto max_parse_size = ::fmt::formatted_size(parse_string, UINT32_MAX);

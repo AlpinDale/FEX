@@ -3,7 +3,11 @@
 #include <jemalloc/jemalloc.h>
 #endif
 
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -69,10 +73,29 @@ void* calloc(size_t n, size_t size) {
   return ::calloc(n, size);
 }
 void* memalign(size_t align, size_t s) {
+#ifdef __APPLE__
+  // macOS posix_memalign requires alignment to be at least sizeof(void*)
+  size_t alignment = align;
+  if (alignment < sizeof(void*)) {
+    alignment = sizeof(void*);
+  }
+  void* ptr = nullptr;
+  if (::posix_memalign(&ptr, alignment, s) != 0) {
+    return nullptr;
+  }
+  return ptr;
+#else
   return ::memalign(align, s);
+#endif
 }
 void* valloc(size_t size) {
+#ifdef __APPLE__
+  void* ptr = nullptr;
+  ::posix_memalign(&ptr, sysconf(_SC_PAGESIZE), size);
+  return ptr;
+#else
   return ::valloc(size);
+#endif
 }
 int posix_memalign(void** r, size_t a, size_t s) {
   return ::posix_memalign(r, a, s);
@@ -84,10 +107,28 @@ void free(void* ptr) {
   return ::free(ptr);
 }
 size_t malloc_usable_size(void* ptr) {
+#ifdef __APPLE__
+  return ::malloc_size(ptr);
+#else
   return ::malloc_usable_size(ptr);
+#endif
 }
 void* aligned_alloc(size_t a, size_t s) {
+#ifdef __APPLE__
+  // macOS posix_memalign requires alignment to be at least sizeof(void*)
+  // and a power of two. Ensure minimum alignment.
+  size_t alignment = a;
+  if (alignment < sizeof(void*)) {
+    alignment = sizeof(void*);
+  }
+  void* ptr = nullptr;
+  if (::posix_memalign(&ptr, alignment, s) != 0) {
+    return nullptr;
+  }
+  return ptr;
+#else
   return ::aligned_alloc(a, s);
+#endif
 }
 void aligned_free(void* ptr) {
   return ::free(ptr);

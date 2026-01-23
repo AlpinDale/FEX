@@ -10,7 +10,13 @@
 #include <signal.h>
 #include <string.h>
 #ifndef _WIN32
+#ifdef __APPLE__
+#define _XOPEN_SOURCE
+#include <sys/ucontext.h>
+#undef _XOPEN_SOURCE
+#else
 #include <ucontext.h>
+#endif
 #endif
 #include <stdint.h>
 #include <type_traits>
@@ -87,10 +93,19 @@ static inline ucontext_t* GetUContext(void* ucontext) {
   return _context;
 }
 
+// On macOS, mcontext_t is already a pointer (__darwin_mcontext64*)
+// On Linux, mcontext_t is a struct, so we return a pointer to it
+#ifdef __APPLE__
+static inline mcontext_t GetMContext(void* ucontext) {
+  ucontext_t* _context = (ucontext_t*)ucontext;
+  return _context->uc_mcontext;
+}
+#else
 static inline mcontext_t* GetMContext(void* ucontext) {
   ucontext_t* _context = (ucontext_t*)ucontext;
   return &_context->uc_mcontext;
 }
+#endif
 
 
 #ifdef ARCHITECTURE_arm64
@@ -115,6 +130,57 @@ struct HostESRState {
   uint64_t ESR;
 };
 
+#ifdef __APPLE__
+// macOS uses __ss for thread state (general purpose registers, sp, pc, etc.)
+static inline uint64_t GetSp(void* ucontext) {
+  return (uint64_t)GetMContext(ucontext)->__ss.__sp;
+}
+
+static inline uint64_t GetPc(void* ucontext) {
+  return (uint64_t)GetMContext(ucontext)->__ss.__pc;
+}
+
+static inline uint64_t* GetArmPc(void* ucontext) {
+  return reinterpret_cast<uint64_t*>(&GetMContext(ucontext)->__ss.__pc);
+}
+
+static inline void SetSp(void* ucontext, uint64_t val) {
+  GetMContext(ucontext)->__ss.__sp = val;
+}
+
+static inline void SetPc(void* ucontext, uint64_t val) {
+  GetMContext(ucontext)->__ss.__pc = val;
+}
+
+static inline uint64_t GetState(void* ucontext) {
+  return GetMContext(ucontext)->__ss.__x[28];
+}
+
+static inline void SetState(void* ucontext, uint64_t val) {
+  GetMContext(ucontext)->__ss.__x[28] = val;
+}
+
+static inline void SetFillSRASingleInst(void* ucontext, bool SingleInst) {
+  GetMContext(ucontext)->__ss.__x[1] = SingleInst;
+}
+
+static inline uint64_t GetArmReg(void* ucontext, uint32_t id) {
+  return GetMContext(ucontext)->__ss.__x[id];
+}
+
+static inline uint64_t GetArmPState(void* ucontext) {
+  return GetMContext(ucontext)->__ss.__cpsr;
+}
+
+static inline uint64_t* GetArmGPRs(void* ucontext) {
+  return reinterpret_cast<uint64_t*>(GetMContext(ucontext)->__ss.__x);
+}
+
+static inline void SetArmReg(void* ucontext, uint32_t id, uint64_t val) {
+  GetMContext(ucontext)->__ss.__x[id] = val;
+}
+#else
+// Linux ARM64 mcontext structure
 static inline uint64_t GetSp(void* ucontext) {
   return GetMContext(ucontext)->sp;
 }
@@ -162,7 +228,26 @@ static inline uint64_t* GetArmGPRs(void* ucontext) {
 static inline void SetArmReg(void* ucontext, uint32_t id, uint64_t val) {
   GetMContext(ucontext)->regs[id] = val;
 }
+#endif
 
+#ifdef __APPLE__
+// macOS uses __ns for NEON state (floating point registers)
+static inline __uint128_t GetArmFPR(void* ucontext, uint32_t id) {
+  auto MContext = GetMContext(ucontext);
+  return MContext->__ns.__v[id];
+}
+
+static inline __uint128_t* GetArmFPRs(void* ucontext) {
+  auto MContext = GetMContext(ucontext);
+  return reinterpret_cast<__uint128_t*>(&MContext->__ns.__v[0]);
+}
+
+static inline uint64_t GetArmESR(void* ucontext) {
+  auto MContext = GetMContext(ucontext);
+  return MContext->__es.__esr;
+}
+#else
+// Linux uses __reserved array for FPR state
 static inline __uint128_t GetArmFPR(void* ucontext, uint32_t id) {
   auto MContext = GetMContext(ucontext);
   HostFPRState* HostState = reinterpret_cast<HostFPRState*>(&MContext->__reserved[0]);
@@ -195,6 +280,7 @@ static inline uint64_t GetArmESR(void* ucontext) {
 
   return 0;
 }
+#endif
 
 constexpr static uint64_t ESR1_EC = 0b111111U << 26;
 constexpr static uint64_t ESR1_EC_DataAbort = 0b100100U << 26;
@@ -244,6 +330,20 @@ static inline void BackupContext(void* ucontext, T* Backup) {
     auto _ucontext = GetUContext(ucontext);
     auto _mcontext = GetMContext(ucontext);
 
+#ifdef __APPLE__
+    // macOS: copy GPRs from __ss.__x (x0-x28), then fp and lr
+    memcpy(&Backup->GPRs[0], &_mcontext->__ss.__x[0], 29 * sizeof(uint64_t));
+    Backup->GPRs[29] = (uint64_t)_mcontext->__ss.__fp;
+    Backup->GPRs[30] = (uint64_t)_mcontext->__ss.__lr;
+    Backup->PrevSP = ArchHelpers::Context::GetSp(ucontext);
+    Backup->PrevPC = ArchHelpers::Context::GetPc(ucontext);
+    Backup->PState = _mcontext->__ss.__cpsr;
+
+    // macOS uses __ns for NEON state
+    Backup->FPSR = _mcontext->__ns.__fpsr;
+    Backup->FPCR = _mcontext->__ns.__fpcr;
+    memcpy(&Backup->FPRs[0], &_mcontext->__ns.__v[0], 32 * sizeof(__uint128_t));
+#else
     memcpy(&Backup->GPRs[0], &_mcontext->regs[0], 31 * sizeof(uint64_t));
     Backup->PrevSP = ArchHelpers::Context::GetSp(ucontext);
     Backup->PrevPC = ArchHelpers::Context::GetPc(ucontext);
@@ -255,6 +355,7 @@ static inline void BackupContext(void* ucontext, T* Backup) {
     Backup->FPSR = HostState->FPSR;
     Backup->FPCR = HostState->FPCR;
     memcpy(&Backup->FPRs[0], &HostState->FPRs[0], 32 * sizeof(__uint128_t));
+#endif
 
     // Save the signal mask so we can restore it
     memcpy(&Backup->sa_mask, &_ucontext->uc_sigmask, sizeof(uint64_t));
@@ -278,6 +379,20 @@ static inline void RestoreContext(void* ucontext, T* Backup) {
     auto _ucontext = GetUContext(ucontext);
     auto _mcontext = GetMContext(ucontext);
 
+#ifdef __APPLE__
+    // macOS: restore NEON state
+    memcpy(&_mcontext->__ns.__v[0], &Backup->FPRs[0], 32 * sizeof(__uint128_t));
+    _mcontext->__ns.__fpcr = Backup->FPCR;
+    _mcontext->__ns.__fpsr = Backup->FPSR;
+
+    // Restore GPRs and other state
+    _mcontext->__ss.__cpsr = Backup->PState;
+    ArchHelpers::Context::SetPc(ucontext, Backup->PrevPC);
+    ArchHelpers::Context::SetSp(ucontext, Backup->PrevSP);
+    memcpy(&_mcontext->__ss.__x[0], &Backup->GPRs[0], 29 * sizeof(uint64_t));
+    _mcontext->__ss.__fp = Backup->GPRs[29];
+    _mcontext->__ss.__lr = Backup->GPRs[30];
+#else
     HostFPRState* HostState = reinterpret_cast<HostFPRState*>(&_mcontext->__reserved[0]);
     LOGMAN_THROW_A_FMT(HostState->Head.Magic == FPR_MAGIC, "Wrong FPR Magic: 0x{:08x}", HostState->Head.Magic);
     memcpy(&HostState->FPRs[0], &Backup->FPRs[0], 32 * sizeof(__uint128_t));
@@ -289,6 +404,7 @@ static inline void RestoreContext(void* ucontext, T* Backup) {
     ArchHelpers::Context::SetPc(ucontext, Backup->PrevPC);
     ArchHelpers::Context::SetSp(ucontext, Backup->PrevSP);
     memcpy(&_mcontext->regs[0], &Backup->GPRs[0], 31 * sizeof(uint64_t));
+#endif
 
     // Restore the signal mask now
     memcpy(&_ucontext->uc_sigmask, &Backup->sa_mask, sizeof(uint64_t));

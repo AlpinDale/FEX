@@ -7,9 +7,13 @@ $end_info$
 
 #include "LinuxSyscalls/Seccomp/SeccompEmulator.h"
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <linux/bpf_common.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#endif
 
 namespace FEX::HLE {
 void SeccompEmulator::DumpProgram(const sock_fprog* prog) {

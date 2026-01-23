@@ -8,7 +8,12 @@
 #include <signal.h>
 #include <stdio.h>
 #ifndef _WIN32
+#ifdef __APPLE__
+#include <sys/syscall.h>
+#include <pthread.h>
+#else
 #include <syscall.h>
+#endif
 #else
 #include <processthreadsapi.h>
 #endif
@@ -51,7 +56,61 @@ namespace FHU::Syscalls {
 #define SYS_pidfd_open 434
 #endif
 
-#ifndef _WIN32
+#ifdef __APPLE__
+// macOS implementations
+inline int32_t getcpu(uint32_t* cpu, uint32_t* node) {
+  // macOS doesn't have getcpu, but we can get current CPU with undocumented API
+  // or just return 0 for simplicity
+  if (cpu) {
+    *cpu = 0; // TODO(alpin): could use _os_cpu_number() if available
+  }
+  if (node) {
+    *node = 0;
+  }
+  return 0;
+}
+
+inline int32_t gettid() {
+  uint64_t tid;
+  pthread_threadid_np(nullptr, &tid);
+  return static_cast<int32_t>(tid);
+}
+
+inline int32_t tgkill(pid_t tgid, pid_t tid, int sig) {
+  // macOS doesn't have tgkill, use pthread_kill if same process
+  if (tgid == getpid()) {
+    // We can't directly signal a thread by tid on macOS
+    // Fall back to kill for same process
+    return kill(tgid, sig);
+  }
+  return kill(tgid, sig);
+}
+
+inline int32_t statx(int dirfd, const char* pathname, int32_t flags, uint32_t mask, void* statxbuf) {
+  // macOS doesn't have statx, would need to emulate with fstatat
+  // For now, return error
+  errno = ENOSYS;
+  return -1;
+}
+
+inline int32_t renameat2(int olddirfd, const char* oldpath, int newdirfd, const char* newpath, unsigned int flags) {
+  // macOS doesn't have renameat2, use renameat if no special flags
+  if (flags == 0) {
+    return renameat(olddirfd, oldpath, newdirfd, newpath);
+  }
+  // Flags not supported on macOS
+  errno = EINVAL;
+  return -1;
+}
+
+inline int32_t pidfd_open(pid_t pid, unsigned int flags) {
+  // macOS doesn't have pidfd
+  errno = ENOSYS;
+  return -1;
+}
+
+#elif !defined(_WIN32)
+// Linux implementations
 inline int32_t getcpu(uint32_t* cpu, uint32_t* node) {
   // Third argument is unused
 #if defined(HAS_SYSCALL_GETCPU) && HAS_SYSCALL_GETCPU

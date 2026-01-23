@@ -13,7 +13,20 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#ifdef __APPLE__
+#define PR_GET_MEM_MODEL 0x6d656d00
+#define PR_SET_MEM_MODEL 0x6d656d01
+static inline int prctl(int option, unsigned long arg2 = 0, unsigned long arg3 = 0, unsigned long arg4 = 0, unsigned long arg5 = 0) {
+  (void)option;
+  (void)arg2;
+  (void)arg3;
+  (void)arg4;
+  (void)arg5;
+  return -1;
+}
+#else
 #include <sys/prctl.h>
+#endif
 
 namespace {
 struct TSOEmulationFacts {

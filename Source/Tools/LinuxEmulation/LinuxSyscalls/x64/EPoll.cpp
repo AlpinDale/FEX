@@ -16,8 +16,13 @@ $end_info$
 #include <algorithm>
 #include <cstdint>
 #include <stddef.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#include <sys/syscall.h>
+#else
 #include <sys/epoll.h>
 #include <syscall.h>
+#endif
 #include <unistd.h>
 
 struct timespec;

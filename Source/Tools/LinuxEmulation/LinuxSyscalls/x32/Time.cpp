@@ -12,10 +12,18 @@ $end_info$
 #include "LinuxSyscalls/x64/Syscalls.h"
 
 #include <stdint.h>
+#ifdef __APPLE__
+#include <sys/syscall.h>
+#else
 #include <syscall.h>
+#endif
 #include <sys/stat.h>
 #include <sys/time.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <sys/timex.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>

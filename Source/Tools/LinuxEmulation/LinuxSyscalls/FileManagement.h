@@ -20,7 +20,13 @@ $end_info$
 #include <fcntl.h>
 #include <functional>
 #include <mutex>
+#ifdef __APPLE__
+#include <limits.h>
+#include <sys/syslimits.h>
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <linux/limits.h>
+#endif
 #include <optional>
 #include <sys/stat.h>
 #include <unistd.h>

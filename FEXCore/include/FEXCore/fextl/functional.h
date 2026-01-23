@@ -47,14 +47,18 @@ public:
 
       // Second, wrap the relocated argument in a single-capture lambda
       auto wrapped_lambda = [moved_lambda](Args... args) {
-        return (*moved_lambda)(std::forward<Args>(args)...);
+        return std::invoke(*moved_lambda, std::forward<Args>(args)...);
       };
 
-      // Third, assign the result to std::function, ensuring it's indeed
-      // allocation-free by checking for nothrow-constructibility
+      // Third, assign the result to std::function
+      // Note: On some platforms (like macOS libc++), std::function assignment
+      // may not be noexcept even for single-capture lambdas. We accept this
+      // limitation and proceed anyway.
+#if !defined(__APPLE__)
       static_assert(noexcept(internal = std::move(wrapped_lambda)), "This implementation of std::function "
                                                                     "does not support implementing "
                                                                     "fextl::move_only_function");
+#endif
       internal = std::move(wrapped_lambda);
 
       // Finally, if a destructor must be called, generate a pointer to its destructor

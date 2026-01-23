@@ -29,10 +29,18 @@ $end_info$
 #include <cstddef>
 #include <cstring>
 #include <functional>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <linux/futex.h>
-#include <syscall.h>
-#include <sys/mman.h>
 #include <sys/signalfd.h>
+#endif
+#ifdef __APPLE__
+#include <sys/syscall.h>
+#else
+#include <syscall.h>
+#endif
+#include <sys/mman.h>
 #include <unistd.h>
 #include <utility>
 
@@ -652,7 +660,11 @@ void SignalDelegator::HandleGuestSignal(FEX::HLE::ThreadStateObject* ThreadObjec
     ThreadObject->SignalInfo.DeferredSignalFrames.emplace_back(ThreadStateObject::DeferredSignalState {
       .Info = SigInfo,
       .Signal = Signal,
+#ifdef __APPLE__
+      .SigMask = _context->uc_sigmask,
+#else
       .SigMask = _context->uc_sigmask.__val[0],
+#endif
     });
 
     uint64_t NewMask = GetNewSigMask(Signal);
@@ -922,7 +934,10 @@ SignalDelegator::SignalDelegator(FEXCore::Context::Context* _CTX, const std::str
       ucontext_t* _context = (ucontext_t*)ucontext;
       auto& mcontext = _context->uc_mcontext;
       uint64_t PC {};
-#ifdef ARCHITECTURE_arm64
+#ifdef __APPLE__
+      // macOS arm64 uses __ss.__pc
+      PC = mcontext->__ss.__pc;
+#elif defined(ARCHITECTURE_arm64)
       PC = mcontext.pc;
 #else
       PC = mcontext.gregs[REG_RIP];

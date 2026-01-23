@@ -26,8 +26,11 @@
 #include <new>
 #include <sys/mman.h>
 #include <sys/utsname.h>
+#ifndef __APPLE__
 #include <sys/user.h>
+#endif
 #include <type_traits>
+#include <FEXHeaderUtils/Platform.h>
 #include <utility>
 
 namespace Alloc::OSAllocator {

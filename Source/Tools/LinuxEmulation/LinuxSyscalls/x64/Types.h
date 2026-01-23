@@ -10,13 +10,19 @@ $end_info$
 #include "LinuxSyscalls/Types.h"
 #include <FEXCore/Utils/CompilerDefs.h>
 
+#include <cstdint>
+#include <sys/stat.h>
+#include <type_traits>
+
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+// IPC structures (ipc64_perm, semid64_ds) are defined in LinuxCompat.h
+#else
 #include <linux/types.h>
 #include <asm/ipcbuf.h>
 #include <asm/posix_types.h>
 #include <asm/sembuf.h>
-#include <cstdint>
-#include <sys/stat.h>
-#include <type_traits>
+#endif
 
 namespace FEX::HLE::x64 {
 using kernel_old_time_t = int64_t;
@@ -148,6 +154,16 @@ struct FEX_ANNOTATE("fex-match") FEX_PACKED guest_stat {
     COPY(st_blksize);
     COPY(st_blocks);
 
+#ifdef __APPLE__
+    val.st_atimespec.tv_sec = st_atime_;
+    val.st_atimespec.tv_nsec = fex_st_atime_nsec;
+
+    val.st_mtimespec.tv_sec = st_mtime_;
+    val.st_mtimespec.tv_nsec = fex_st_mtime_nsec;
+
+    val.st_ctimespec.tv_sec = st_ctime_;
+    val.st_ctimespec.tv_nsec = fex_st_ctime_nsec;
+#else
     val.st_atim.tv_sec = st_atime_;
     val.st_atim.tv_nsec = fex_st_atime_nsec;
 
@@ -156,6 +172,7 @@ struct FEX_ANNOTATE("fex-match") FEX_PACKED guest_stat {
 
     val.st_ctim.tv_sec = st_ctime_;
     val.st_ctim.tv_nsec = fex_st_ctime_nsec;
+#endif
 #undef COPY
     return val;
   }
@@ -175,6 +192,16 @@ struct FEX_ANNOTATE("fex-match") FEX_PACKED guest_stat {
     COPY(st_blksize);
     COPY(st_blocks);
 
+#ifdef __APPLE__
+    st_atime_ = val.st_atimespec.tv_sec;
+    fex_st_atime_nsec = val.st_atimespec.tv_nsec;
+
+    st_mtime_ = val.st_mtime;
+    fex_st_mtime_nsec = val.st_mtimespec.tv_nsec;
+
+    st_ctime_ = val.st_ctime;
+    fex_st_ctime_nsec = val.st_ctimespec.tv_nsec;
+#else
     st_atime_ = val.st_atim.tv_sec;
     fex_st_atime_nsec = val.st_atim.tv_nsec;
 
@@ -183,6 +210,7 @@ struct FEX_ANNOTATE("fex-match") FEX_PACKED guest_stat {
 
     st_ctime_ = val.st_ctime;
     fex_st_ctime_nsec = val.st_ctim.tv_nsec;
+#endif
 #undef COPY
     __pad0 = 0;
   }

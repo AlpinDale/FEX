@@ -10,9 +10,14 @@ $end_info$
 #include "LinuxSyscalls/x32/Syscalls.h"
 #include "LinuxSyscalls/x32/Types.h"
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#include <sys/syscall.h>
+#else
 #include <linux/aio_abi.h>
-#include <stdint.h>
 #include <syscall.h>
+#endif
+#include <stdint.h>
 #include <unistd.h>
 
 namespace FEX::HLE::x32 {

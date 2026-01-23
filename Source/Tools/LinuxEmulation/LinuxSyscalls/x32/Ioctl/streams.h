@@ -4,6 +4,9 @@
 
 #include <cstdint>
 #include <sys/ioctl.h>
+#ifdef __APPLE__
+#include <asm/ioctls.h>
+#endif
 
 namespace FEX::HLE::x32 {
 namespace streams {

@@ -9,6 +9,10 @@ file(GLOB_RECURSE ASM_SOURCES CONFIGURE_DEPENDS *.asm)
 
 set(ASM_DEPENDS "")
 
+# macOS sed requires different syntax for in-place editing
+# On macOS: sed -i '' (empty string backup suffix)
+# On Linux: sed -i (no backup)
+
 execute_process(COMMAND "python3" "${CMAKE_SOURCE_DIR}/Scripts/ClassifyCPU.py"
   OUTPUT_STRIP_TRAILING_WHITESPACE
   OUTPUT_VARIABLE CPU_CLASS)
@@ -27,10 +31,19 @@ foreach(ASM_SRC ${ASM_SOURCES})
   set(ASM_TMP "${ASM_NAME}_TMP.asm")
   set(TMP_FILE "${OUTPUT_ASM_FOLDER}/${ASM_TMP}")
 
-  add_custom_command(OUTPUT ${TMP_FILE}
-    DEPENDS "${ASM_SRC}"
-    COMMAND "cp" ARGS "${ASM_SRC}" "${TMP_FILE}"
-    COMMAND "sed" ARGS "-i" "-e" "\'1s;^;BITS 64\\n;\'" "-e" "\'\$\$a\\ret\\n\'" "${TMP_FILE}")
+  if(APPLE)
+    # On macOS, create the temp file with prepended BITS and appended ret using shell
+    # Add extra newline before ret in case source file doesn't end with newline
+    add_custom_command(OUTPUT ${TMP_FILE}
+      DEPENDS "${ASM_SRC}"
+      COMMAND /bin/sh -c "echo 'BITS 64' > '${TMP_FILE}' && cat '${ASM_SRC}' >> '${TMP_FILE}' && echo '' >> '${TMP_FILE}' && echo 'ret' >> '${TMP_FILE}'"
+      VERBATIM)
+  else()
+    add_custom_command(OUTPUT ${TMP_FILE}
+      DEPENDS "${ASM_SRC}"
+      COMMAND cp "${ASM_SRC}" "${TMP_FILE}"
+      COMMAND sed -i -e "1s;^;BITS 64\\n;" -e "\\$$a\\ret\\n" "${TMP_FILE}")
+  endif()
 
   set(OUTPUT_NAME "${OUTPUT_ASM_FOLDER}/${ASM_NAME}.bin")
   set(OUTPUT_CONFIG_NAME "${OUTPUT_ASM_FOLDER}/${ASM_NAME}.config.bin")

@@ -13,7 +13,9 @@
 
 #include <cstddef>
 #include <sys/resource.h>
+#ifndef __APPLE__
 #include <sys/sysinfo.h>
+#endif
 #include <thread>
 
 namespace FEX::AOT {

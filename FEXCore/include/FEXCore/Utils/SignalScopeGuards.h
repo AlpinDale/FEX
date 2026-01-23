@@ -153,9 +153,21 @@ private:
 class ScopedSignalMasker final {
 public:
   explicit ScopedSignalMasker(uint64_t Mask)
-    : OriginalMask(0) {
+    : OriginalMask(sigset_t {}) {
     // Mask all signals, storing the original incoming mask
-    ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &Mask, &*OriginalMask, sizeof(*OriginalMask));
+    sigset_t NewMask;
+    sigemptyset(&NewMask);
+    // Convert the uint64_t mask to a sigset_t by setting individual signals
+    for (int sig = 1; sig < 64 && sig < NSIG; sig++) {
+      if (Mask & (1ULL << sig)) {
+        sigaddset(&NewMask, sig);
+      }
+    }
+#ifdef __APPLE__
+    ::sigprocmask(SIG_SETMASK, &NewMask, &*OriginalMask);
+#else
+    ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &NewMask, &*OriginalMask, sizeof(*OriginalMask));
+#endif
   }
 
   // Move-only type
@@ -168,11 +180,15 @@ public:
 
   ~ScopedSignalMasker() {
     if (OriginalMask) {
-      ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &OriginalMask, nullptr, sizeof(*OriginalMask));
+#ifdef __APPLE__
+      ::sigprocmask(SIG_SETMASK, &*OriginalMask, nullptr);
+#else
+      ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &*OriginalMask, nullptr, sizeof(*OriginalMask));
+#endif
     }
   }
 private:
-  std::optional<uint64_t> OriginalMask {};
+  std::optional<sigset_t> OriginalMask {};
 };
 
 /**

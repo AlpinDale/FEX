@@ -18,7 +18,12 @@ $end_info$
 #include <sched.h>
 #include <signal.h>
 #include <stddef.h>
+#ifdef __APPLE__
+#include <sys/syscall.h>
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <syscall.h>
+#endif
 #include <stdint.h>
 #include <unistd.h>
 

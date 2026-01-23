@@ -10,7 +10,7 @@
 
 #include <cstdint>
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 #include <linux/prctl.h>
 #include <sys/prctl.h>
 #endif
@@ -370,7 +370,7 @@ namespace CPU {
   }
 
   auto CodeBufferManager::AllocateNew(size_t Size) -> fextl::shared_ptr<CodeBuffer> {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 // MDWE (Memory-Deny-Write-Execute) is a new Linux 6.3 feature.
 // It's equivalent to systemd's `MemoryDenyWriteExecute` but implemented entirely in the kernel.
 //

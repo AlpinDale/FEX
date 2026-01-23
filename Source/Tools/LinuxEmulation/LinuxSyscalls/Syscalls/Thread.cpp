@@ -43,6 +43,24 @@ $end_info$
 #include <unistd.h>
 #include <sys/fsuid.h>
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#include <algorithm>
+// POLLRDHUP not available on macOS
+#ifndef POLLRDHUP
+#define POLLRDHUP 0x2000
+#endif
+// ppoll stub for macOS
+static inline int ppoll(struct pollfd* fds, nfds_t nfds, const struct timespec* tmo_p, const sigset_t* sigmask) {
+  (void)sigmask; // Ignore signal mask on macOS
+  int timeout_ms = -1;
+  if (tmo_p) {
+    timeout_ms = tmo_p->tv_sec * 1000 + tmo_p->tv_nsec / 1000000;
+  }
+  return poll(fds, nfds, timeout_ms);
+}
+#endif
+
 ARG_TO_STR(idtype_t, "%u")
 
 namespace FEX::HLE {
@@ -503,7 +521,7 @@ void RegisterThread(FEX::HLE::SyscallHandler* Handler) {
                             const auto auxv = FEX::HLE::_SyscallHandler->GetCodeLoader()->GetAuxv();
                             const auto auxvBase = auxv.address;
                             const auto auxvSize = auxv.size;
-                            size_t MinSize = std::min(auxvSize, UserSize);
+                            size_t MinSize = std::min(static_cast<size_t>(auxvSize), UserSize);
 
                             memcpy(addr, reinterpret_cast<void*>(auxvBase), MinSize);
 

@@ -3,6 +3,9 @@
 #include "LinuxSyscalls/x32/Ioctl/HelperDefines.h"
 
 #include <cstdint>
+#ifdef __APPLE__
+#include <asm/ioctls.h>
+#endif
 #include <linux/usbdevice_fs.h>
 #include <sys/ioctl.h>
 

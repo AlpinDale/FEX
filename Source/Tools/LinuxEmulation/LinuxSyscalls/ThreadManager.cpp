@@ -12,7 +12,11 @@
 #include <FEXCore/fextl/fmt.h>
 
 #include <sys/mman.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <sys/personality.h>
+#endif
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <git_version.h>

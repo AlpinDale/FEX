@@ -20,6 +20,9 @@ $end_info$
 #include <errno.h>
 #include <limits>
 #include <string.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
 #include <sys/msg.h>
 #include <sys/shm.h>
 #include <time.h>

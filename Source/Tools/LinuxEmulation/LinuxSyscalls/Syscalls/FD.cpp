@@ -16,16 +16,63 @@ $end_info$
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/file.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+// eventfd stub for macOS
+#define EFD_CLOEXEC O_CLOEXEC
+#define EFD_NONBLOCK O_NONBLOCK
+#define EFD_SEMAPHORE 1
+// inotify stubs for macOS
+#define IN_ACCESS 0x00000001
+#define IN_MODIFY 0x00000002
+#define IN_ATTRIB 0x00000004
+#define IN_CLOSE_WRITE 0x00000008
+#define IN_CLOSE_NOWRITE 0x00000010
+#define IN_OPEN 0x00000020
+#define IN_MOVED_FROM 0x00000040
+#define IN_MOVED_TO 0x00000080
+#define IN_CREATE 0x00000100
+#define IN_DELETE 0x00000200
+#define IN_DELETE_SELF 0x00000400
+#define IN_MOVE_SELF 0x00000800
+#define IN_CLOEXEC O_CLOEXEC
+#define IN_NONBLOCK O_NONBLOCK
+static inline int inotify_init(void) {
+  errno = ENOSYS;
+  return -1;
+}
+static inline int inotify_init1(int flags) {
+  (void)flags;
+  errno = ENOSYS;
+  return -1;
+}
+static inline int inotify_add_watch(int fd, const char* pathname, uint32_t mask) {
+  (void)fd;
+  (void)pathname;
+  (void)mask;
+  errno = ENOSYS;
+  return -1;
+}
+static inline int inotify_rm_watch(int fd, int wd) {
+  (void)fd;
+  (void)wd;
+  errno = ENOSYS;
+  return -1;
+}
+#else
 #include <sys/eventfd.h>
 #include <sys/inotify.h>
-#include <sys/mman.h>
 #include <sys/timerfd.h>
+#endif
+#include <sys/mman.h>
+#ifndef __APPLE__
+#include <sys/timerfd.h>
+#endif
 #include <poll.h>
 #include <stddef.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <sys/eventfd.h>
 #include <sys/syscall.h>
 
 namespace FEX::HLE {

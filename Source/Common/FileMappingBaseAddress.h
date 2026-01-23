@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <span>
 
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 
 namespace FEXCore {
 

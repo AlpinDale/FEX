@@ -100,6 +100,17 @@ static inline uint64_t LoadExclusive(uint64_t* Futex) {
   return Result;
 }
 
+// On macOS ARM64, size_t is 'unsigned long' which is distinct from 'uint64_t' (unsigned long long)
+// even though they have the same size. Provide overloads for unsigned long.
+#if defined(__APPLE__) && defined(__LP64__)
+static inline unsigned long LoadExclusive(unsigned long* Futex) {
+  unsigned long Result {};
+  __asm volatile(SPINLOOP_WFE_LDX_64BIT : [Result] "=r"(Result), [Futex] "+r"(Futex)::"memory");
+
+  return Result;
+}
+#endif
+
 static inline uint8_t WFELoadAtomic(uint8_t* Futex) {
   uint8_t Result {};
   __asm volatile(SPINLOOP_8BIT : [Result] "=r"(Result), [Futex] "+r"(Futex)::"memory");
@@ -127,6 +138,16 @@ static inline uint64_t WFELoadAtomic(uint64_t* Futex) {
 
   return Result;
 }
+
+// On macOS ARM64, size_t is 'unsigned long' which is distinct from 'uint64_t' (unsigned long long)
+#if defined(__APPLE__) && defined(__LP64__)
+static inline unsigned long WFELoadAtomic(unsigned long* Futex) {
+  unsigned long Result {};
+  __asm volatile(SPINLOOP_64BIT : [Result] "=r"(Result), [Futex] "+r"(Futex)::"memory");
+
+  return Result;
+}
+#endif
 
 template<typename Pred, typename T>
 static inline void WaitPred(T* Futex, T ComparisonValue) {
@@ -249,6 +270,9 @@ template void Wait<uint8_t>(uint8_t*, uint8_t);
 template void Wait<uint16_t>(uint16_t*, uint16_t);
 template void Wait<uint32_t>(uint32_t*, uint32_t);
 template void Wait<uint64_t>(uint64_t*, uint64_t);
+#if defined(__APPLE__) && defined(__LP64__)
+template void Wait<unsigned long>(unsigned long*, unsigned long);
+#endif
 
 template<typename T>
 static inline void lock(T* Futex) {

@@ -18,12 +18,18 @@ $end_info$
 #include <stdint.h>
 #include <sys/select.h>
 #include <sys/stat.h>
+#ifndef __APPLE__
 #include <sys/statfs.h>
-#include <sys/time.h>
-#include <sys/uio.h>
 #include <sys/sendfile.h>
 #include <sys/timerfd.h>
 #include <syscall.h>
+#else
+#include "LinuxSyscalls/LinuxCompat.h"
+#include <sys/syscall.h>
+#include <sys/mount.h> // macOS uses this for statfs
+#endif
+#include <sys/time.h>
+#include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
 

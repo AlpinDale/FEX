@@ -4,7 +4,8 @@ add_executable(FEXServer
   Logger.cpp
   PipeScanner.cpp
   ProcessPipe.cpp
-  SquashFS.cpp)
+  SquashFS.cpp
+  $<$<PLATFORM_ID:Darwin>:SignalHelper.c>)
 
 target_include_directories(FEXServer PRIVATE ${CMAKE_BINARY_DIR}/generated)
 

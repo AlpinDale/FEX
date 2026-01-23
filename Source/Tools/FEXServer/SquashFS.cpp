@@ -13,6 +13,31 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <thread>
+#include <unistd.h>
+
+#ifdef __APPLE__
+// pipe2 not available on macOS
+static inline int pipe2(int pipefd[2], int flags) {
+  int result = pipe(pipefd);
+  if (result == 0) {
+    if (flags & O_CLOEXEC) {
+      fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+      fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+    }
+    if (flags & O_NONBLOCK) {
+      fcntl(pipefd[0], F_SETFL, fcntl(pipefd[0], F_GETFL) | O_NONBLOCK);
+      fcntl(pipefd[1], F_SETFL, fcntl(pipefd[1], F_GETFL) | O_NONBLOCK);
+    }
+  }
+  return result;
+}
+// fdatasync not available on macOS
+static inline int fdatasync(int fd) {
+  return fsync(fd);
+}
+// environ
+extern char** environ;
+#endif
 
 namespace SquashFS {
 
@@ -38,7 +63,7 @@ bool InitializeSquashFSPipe() {
     ServerRootFSLockFD = open(RootFSLockFile.c_str(), O_RDWR | O_CLOEXEC, USER_PERMS);
     if (ServerRootFSLockFD != -1) {
       // Now that we have opened the file, try to get a write lock.
-      flock lk {
+      struct flock lk {
         .l_type = F_WRLCK,
         .l_whence = SEEK_SET,
         .l_start = 0,
@@ -65,7 +90,7 @@ bool InitializeSquashFSPipe() {
     return false;
   } else {
     // FIFO file was created. Try to get a write lock
-    flock lk {
+    struct flock lk {
       .l_type = F_WRLCK,
       .l_whence = SEEK_SET,
       .l_start = 0,
@@ -85,7 +110,7 @@ bool InitializeSquashFSPipe() {
 }
 
 bool DowngradeRootFSPipeToReadLock() {
-  flock lk {
+  struct flock lk {
     .l_type = F_RDLCK,
     .l_whence = SEEK_SET,
     .l_start = 0,
@@ -137,7 +162,12 @@ bool MountRootFSImagePath(const fextl::string& SquashFS, bool EroFS) {
     argv[3] = nullptr;
 
     // Try and execute {erofsfuse, squashfuse} to mount our rootfs
+#ifdef __APPLE__
+    // execvpe not available on macOS, use execvp which searches PATH
+    if (execvp(argv[0], (char* const*)argv) == -1) {
+#else
     if (execvpe(argv[0], (char* const*)argv, environ) == -1) {
+#endif
       // Give a hopefully helpful error message for users
       LogMan::Msg::EFmt("[FEXServer] '{}' Couldn't execute for some reason: {} {}\n", argv[0], errno, strerror(errno));
       LogMan::Msg::EFmt("[FEXServer] To mount squashfs rootfs files you need {} installed\n", argv[0]);

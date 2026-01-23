@@ -16,6 +16,11 @@
 #include <vector>
 #include <unistd.h>
 
+// POLLRDHUP is Linux-specific
+#ifndef POLLRDHUP
+#define POLLRDHUP 0
+#endif
+
 #include <FEXCore/fextl/functional.h>
 #include <FEXCore/fextl/map.h>
 #include <FEXCore/fextl/vector.h>
@@ -80,7 +85,13 @@ public:
   // Adds an internal FD to wake up and exit the reactor when stop_async() is called from any thread.
   void enable_async_stop() {
     ::pipe(AsyncStopRequest);
+#ifdef __APPLE__
+    // On macOS, use POLLIN instead of POLLHUP since we'll close the write end to signal.
+    // POLLHUP can be triggered prematurely on macOS for pipe FDs.
+    PollFDs.push_back(pollfd {.fd = AsyncStopRequest[0], .events = POLLIN, .revents = 0});
+#else
     PollFDs.push_back(pollfd {.fd = AsyncStopRequest[0], .events = POLLHUP, .revents = 0});
+#endif
     callbacks[AsyncStopRequest[0]] = [](error) {
       return post_callback::stop_reactor;
     };
@@ -109,9 +120,15 @@ public:
 
     timespec ts = to_timespec(Timeout.value_or(std::chrono::nanoseconds {0}));
 
-    // ppoll may return EINTR/EAGAIN, so a loop is used here. Normally, we return in the first iteration.
+    // poll may return EINTR/EAGAIN, so a loop is used here. Normally, we return in the first iteration.
     while (true) {
+#ifdef __APPLE__
+      // macOS doesn't have ppoll, use poll with millisecond timeout
+      int timeout_ms = Timeout ? static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(Timeout.value()).count()) : -1;
+      int Result = ::poll(PollFDs.data(), PollFDs.size(), timeout_ms);
+#else
       int Result = ::ppoll(PollFDs.data(), PollFDs.size(), Timeout ? &ts : nullptr, nullptr);
+#endif
 
       if (Result < 0) {
         if (errno == EINTR || errno == EAGAIN) {

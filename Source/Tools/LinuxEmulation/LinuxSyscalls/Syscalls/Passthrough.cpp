@@ -13,7 +13,11 @@ $end_info$
 #include <FEXCore/IR/IR.h>
 
 #include <stdint.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <sys/epoll.h>
+#endif
 
 namespace FEX::HLE {
 #ifdef ARCHITECTURE_arm64

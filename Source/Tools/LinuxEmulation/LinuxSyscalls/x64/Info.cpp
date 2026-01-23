@@ -12,7 +12,11 @@ $end_info$
 #include <cstring>
 #include <sys/utsname.h>
 #include <sys/resource.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <sys/sysinfo.h>
+#endif
 
 namespace FEX::HLE::x64 {
 void RegisterInfo(FEX::HLE::SyscallHandler* Handler) {

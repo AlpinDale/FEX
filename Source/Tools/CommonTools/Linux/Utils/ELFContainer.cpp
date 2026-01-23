@@ -16,10 +16,10 @@ $end_info$
 
 #include <algorithm>
 #include <cstring>
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 #include <fcntl.h>
 #include <memory>
-#include <linux/limits.h>
+#include <FEXHeaderUtils/Platform.h>
 #include <system_error>
 #include <sys/stat.h>
 #include <unistd.h>

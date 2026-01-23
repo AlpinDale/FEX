@@ -15,10 +15,12 @@
 
 #include <cstdlib>
 #include <fcntl.h>
-#include <linux/limits.h>
+#include <FEXHeaderUtils/Platform.h>
 #include <unistd.h>
 #include <sys/poll.h>
+#ifndef __APPLE__
 #include <sys/prctl.h>
+#endif
 #include <sys/signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -179,7 +181,8 @@ int ConnectToServer(ConnectionOption ConnectionOption) {
   }
 
   // Steam doesn't get to connect to global sockets.
-#ifndef FEX_STEAM_SUPPORT
+  // macOS doesn't support abstract Unix sockets, so skip them there.
+#if !defined(FEX_STEAM_SUPPORT) && !defined(__APPLE__)
   auto ServerSocketName = GetServerSocketName();
 
   // AF_UNIX has a special feature for named socket paths.
@@ -208,7 +211,13 @@ int ConnectToServer(ConnectionOption ConnectionOption) {
   addr.sun_family = AF_UNIX;
   SizeOfSocketString = std::min(ServerSocketPath.size(), sizeof(addr.sun_path) - 1);
   strncpy(addr.sun_path, ServerSocketPath.data(), SizeOfSocketString);
+  addr.sun_path[SizeOfSocketString] = '\0'; // Ensure null termination
+#ifdef __APPLE__
+  // macOS requires the full sockaddr_un size for path-based sockets
+  SizeOfAddr = sizeof(struct sockaddr_un);
+#else
   SizeOfAddr = sizeof(addr.sun_family) + SizeOfSocketString;
+#endif
   if (connect(SocketFD, reinterpret_cast<struct sockaddr*>(&addr), SizeOfAddr) == -1) {
     if (ConnectionOption == ConnectionOption::Default || (errno != ECONNREFUSED && errno != ENOENT)) {
       LogMan::Msg::EFmt("Couldn't connect to FEXServer socket {} {}", ServerSocketPath, errno);
@@ -245,7 +254,11 @@ int StartServer(std::string_view InterpreterPath, int watch_fd) {
 
   // Open some pipes for letting us know when the server is ready
   int fds[2] {};
+#ifdef __APPLE__
+  if (pipe(fds) != 0) {
+#else
   if (pipe2(fds, 0) != 0) {
+#endif
     LogMan::Msg::EFmt("Couldn't open pipe");
     return -1;
   }

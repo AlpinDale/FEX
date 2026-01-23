@@ -23,6 +23,21 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+// memfd_create doesn't exist on macOS, use temporary file instead
+#include <fcntl.h>
+static inline int fex_memfd_create(const char* name, unsigned int flags) {
+  (void)name;
+  (void)flags;
+  char template_path[] = "/tmp/fex_memfd_XXXXXX";
+  int fd = mkstemp(template_path);
+  if (fd >= 0) {
+    unlink(template_path); // unlink immediately so it's deleted when closed
+  }
+  return fd;
+}
+#endif
+
 #include <tiny-json.h>
 
 namespace ArgOptions {
@@ -253,7 +268,11 @@ void CheckUnsquashfs() {
     nullptr,
   };
 
+#ifdef __APPLE__
+  int fd = fex_memfd_create("stdout", 0);
+#else
   int fd = ::syscall(SYS_memfd_create, "stdout", 0);
+#endif
   int32_t Result = Exec::ExecAndWaitForResponseRedirect(ExecveArgs[0], const_cast<char* const*>(ExecveArgs.data()), fd, fd);
   Has_Unsquashfs = Result != -1;
   if (Has_Unsquashfs) {

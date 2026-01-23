@@ -20,7 +20,22 @@
 #include <mutex>
 #include <optional>
 #include <poll.h>
+#ifdef __APPLE__
+// prctl not available on macOS
+#define PR_SET_PDEATHSIG 1
+#define PR_SET_CHILD_SUBREAPER 36
+#define POLLRDHUP 0x2000
+static inline int prctl(int option, unsigned long arg2, unsigned long arg3 = 0, unsigned long arg4 = 0, unsigned long arg5 = 0) {
+  (void)option;
+  (void)arg2;
+  (void)arg3;
+  (void)arg4;
+  (void)arg5;
+  return -1;
+}
+#else
 #include <sys/prctl.h>
+#endif
 #include <sys/signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -79,20 +94,37 @@ void ActionHandler(int sig, siginfo_t* info, void* context) {
 
 void ActionIgnore(int sig, siginfo_t* info, void* context) {}
 
+// Helper to call sigaction without ADL issues on macOS
+// C++ has struct sigaction and function sigaction in same scope
+// Use a C helper function defined in SignalHelper.c
+extern "C" int fex_sigaction(int signum, const struct sigaction* act, struct sigaction* oldact);
+
+static int call_sigaction(int signum, const struct sigaction* act, struct sigaction* oldact) {
+  return fex_sigaction(signum, act, oldact);
+}
+
 void SetupSignals() {
   // Setup our signal handlers now so we can capture some events
   struct sigaction act {};
+#ifdef __APPLE__
+  act.__sigaction_u.__sa_sigaction = ActionHandler;
+#else
   act.sa_sigaction = ActionHandler;
+#endif
   act.sa_flags = SA_SIGINFO;
 
   // SIGTERM if something is trying to terminate us
-  sigaction(SIGTERM, &act, nullptr);
+  call_sigaction(SIGTERM, &act, nullptr);
   // SIGINT if something is trying to terminate us
-  sigaction(SIGINT, &act, nullptr);
+  call_sigaction(SIGINT, &act, nullptr);
 
   // SIGUSR1 just to interrupt syscalls
+#ifdef __APPLE__
+  act.__sigaction_u.__sa_sigaction = ActionIgnore;
+#else
   act.sa_sigaction = ActionIgnore;
-  sigaction(SIGUSR1, &act, nullptr);
+#endif
+  call_sigaction(SIGUSR1, &act, nullptr);
 
   // Ignore SIGPIPE, we will be checking for pipe closure which could send this signal
   signal(SIGPIPE, SIG_IGN);
@@ -182,7 +214,8 @@ int main(int argc, char** argv, char** const envp) {
   }
 
   // Steam doesn't get to connect to global sockets.
-#ifndef FEX_STEAM_SUPPORT
+  // macOS doesn't support abstract Unix sockets, so skip them there.
+#if !defined(FEX_STEAM_SUPPORT) && !defined(__APPLE__)
   if (!ProcessPipe::InitializeServerSocket(true)) {
     // Couldn't create server socket for some reason
     PipeScanner::ClosePipes();

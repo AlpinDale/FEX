@@ -2,6 +2,10 @@
 #include "LinuxSyscalls/Utils/Threads.h"
 #include "LinuxSyscalls/Syscalls.h"
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
+
 #include <FEXCore/Core/Context.h>
 #include <FEXCore/Utils/Allocator.h>
 #include <FEXCore/Utils/LongJump.h>

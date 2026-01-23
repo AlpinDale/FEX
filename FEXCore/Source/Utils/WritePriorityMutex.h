@@ -3,7 +3,12 @@
 #include <atomic>
 #include <cstdint>
 
-#if !defined(_WIN32)
+#if defined(__APPLE__)
+#include <os/lock.h>
+#include <pthread.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#elif !defined(_WIN32)
 #include <linux/futex.h> /* Definition of FUTEX_* constants */
 #include <sys/syscall.h> /* Definition of SYS_* constants */
 #include <unistd.h>
@@ -266,7 +271,31 @@ public:
 
 private:
 
-#if !defined(_WIN32)
+#if defined(__APPLE__)
+  // macOS doesn't have futex. Use a simple spin-wait with pthread_cond as fallback.
+  // We use usleep for yielding.
+  void FutexWaitForWriteAvailable(uint32_t Expected) {
+    auto AtomicFutex = std::atomic_ref<uint32_t>(Futex);
+    while (AtomicFutex.load(std::memory_order_relaxed) == Expected) {
+      usleep(1);
+    }
+  }
+
+  void FutexWaitForReadAvailable(uint32_t Expected) {
+    auto AtomicFutex = std::atomic_ref<uint32_t>(Futex);
+    while (AtomicFutex.load(std::memory_order_relaxed) == Expected) {
+      usleep(1);
+    }
+  }
+
+  void FutexWakeWriter() {
+    // No-op on macOS - spin-wait will eventually see the change
+  }
+
+  void FutexWakeReaders() {
+    // No-op on macOS - spin-wait will eventually see the change
+  }
+#elif !defined(_WIN32)
   void FutexWaitForWriteAvailable(uint32_t Expected) {
     ::syscall(SYS_futex, &Futex, FUTEX_PRIVATE_FLAG | FUTEX_WAIT_BITSET, Expected, nullptr, nullptr, FUTEX_BITSET_WAIT_WRITERS);
   }

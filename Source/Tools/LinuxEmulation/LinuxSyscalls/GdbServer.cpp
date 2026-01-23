@@ -39,7 +39,7 @@ $end_info$
 #include <atomic>
 #include <cstring>
 #ifndef _WIN32
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #endif
@@ -57,6 +57,10 @@ $end_info$
 #include "LinuxSyscalls/GdbServer.h"
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/ThreadManager.h"
+
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
 
 namespace FEX {
 

@@ -19,7 +19,11 @@ $end_info$
 #include <stddef.h>
 #include <stdint.h>
 #include <syslog.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <sys/random.h>
+#endif
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <sys/utsname.h>
@@ -27,6 +31,18 @@ $end_info$
 #include <sys/personality.h>
 #include <sys/ptrace.h>
 #include <unistd.h>
+
+#ifdef __APPLE__
+/* PTRACE constants not defined on macOS */
+#ifndef PTRACE_PEEKTEXT
+#define PTRACE_PEEKTEXT 1
+#define PTRACE_PEEKDATA 2
+#define PTRACE_POKETEXT 4
+#define PTRACE_POKEDATA 5
+#define PTRACE_ATTACH 16
+#define PTRACE_DETACH 17
+#endif
+#endif
 
 #include <git_version.h>
 
@@ -37,15 +53,25 @@ using cap_user_data_t = void*;
 void RegisterInfo(FEX::HLE::SyscallHandler* Handler) {
   using namespace FEXCore::IR;
 
+// On macOS, use linux_utsname which has domainname field
+#ifdef __APPLE__
+  REGISTER_SYSCALL_IMPL(uname, [](FEXCore::Core::CpuStateFrame* Frame, struct linux_utsname* buf) -> uint64_t {
+#else
   REGISTER_SYSCALL_IMPL(uname, [](FEXCore::Core::CpuStateFrame* Frame, struct utsname* buf) -> uint64_t {
+#endif
     auto Thread = FEX::HLE::ThreadManager::GetStateObjectFromCPUState(Frame);
 
     struct utsname Local {};
     if (::uname(&Local) == 0) {
       memcpy(buf->nodename, Local.nodename, sizeof(Local.nodename));
+#ifdef __APPLE__
+      // macOS utsname doesn't have domainname field
+      strcpy(buf->domainname, "(none)");
+#else
       static_assert(sizeof(Local.nodename) <= sizeof(buf->nodename));
       memcpy(buf->domainname, Local.domainname, sizeof(Local.domainname));
       static_assert(sizeof(Local.domainname) <= sizeof(buf->domainname));
+#endif
     } else {
       strcpy(buf->nodename, "FEXCore");
       LogMan::Msg::EFmt("Couldn't determine host nodename. Defaulting to '{}'", buf->nodename);

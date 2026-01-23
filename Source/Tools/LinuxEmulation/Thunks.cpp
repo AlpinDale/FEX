@@ -24,7 +24,9 @@ $end_info$
 #include <cstdint>
 #include <dlfcn.h>
 
+#ifndef __APPLE__
 #include <malloc.h>
+#endif
 #include <mutex>
 #include <shared_mutex>
 #include <stdint.h>
@@ -40,7 +42,12 @@ FEX_DEFAULT_VISIBILITY JEMALLOC_NOTHROW extern int glibc_je_is_known_allocation(
 }
 #endif
 
+#ifdef __APPLE__
+// macOS uses mach-o format which requires segment,section (max 16 chars per section name)
+static __attribute__((aligned(16), naked, section("__DATA,H2G_Trampoline"))) void HostToGuestTrampolineTemplate() {
+#else
 static __attribute__((aligned(16), naked, section("HostToGuestTrampolineTemplate"))) void HostToGuestTrampolineTemplate() {
+#endif
 #if defined(ARCHITECTURE_x86_64)
   asm("lea 0f(%rip), %r11 \n"
       "jmpq *0f(%rip) \n"
@@ -65,8 +72,14 @@ static __attribute__((aligned(16), naked, section("HostToGuestTrampolineTemplate
 #endif
 }
 
+#ifdef __APPLE__
+// macOS uses different symbols for section boundaries
+extern char __start_HostToGuestTrampolineTemplate __asm("section$start$__DATA$H2G_Trampoline");
+extern char __stop_HostToGuestTrampolineTemplate __asm("section$end$__DATA$H2G_Trampoline");
+#else
 extern char __start_HostToGuestTrampolineTemplate[];
 extern char __stop_HostToGuestTrampolineTemplate[];
+#endif
 
 namespace FEX::HLE {
 

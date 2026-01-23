@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include <libgen.h> // for basename
 #include "../FEXInterpreter/ELFCodeLoader.h"
 #include <DummyHandlers.h>
 #include <PortabilityInfo.h>
@@ -114,7 +115,7 @@ static FEXCore::Core::InternalThreadState* SetupCompileThread(FEXCore::Context::
 
 // Returns filename of generated cache on success
 static std::optional<std::string>
-GenerateSingleCache(const FEXCore::ExecutableFileInfo& Binary, fextl::set<uintptr_t> BlockList, std::string_view OutDir) {
+GenerateSingleCache(const FEXCore::ExecutableFileInfo& Binary, fextl::set<uint64_t> BlockList, std::string_view OutDir) {
   uint64_t CodeCacheConfigId = 0; // TODO: Make unique to active configuration
 
   ELFCodeLoader Loader(Binary.Filename.c_str(), -1, "", fextl::vector<fextl::string> {Binary.Filename.c_str()},
@@ -211,7 +212,7 @@ static int GenerateCache(int argc, const char** argv) {
   }
 
   FEXCore::ExecutableFileInfo ProgramName;
-  std::map<FEXCore::ExecutableFileInfo, fextl::set<uintptr_t>> Data;
+  std::map<FEXCore::ExecutableFileInfo, fextl::set<uint64_t>> Data;
   {
     auto Parsed = FEXCore::CodeMap::ParseCodeMap(Codemap);
 

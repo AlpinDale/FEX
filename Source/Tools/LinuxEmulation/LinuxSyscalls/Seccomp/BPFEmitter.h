@@ -10,8 +10,12 @@ $end_info$
 
 #include <FEXCore/fextl/unordered_map.h>
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#endif
 
 struct sock_fprog;
 struct sock_filter;

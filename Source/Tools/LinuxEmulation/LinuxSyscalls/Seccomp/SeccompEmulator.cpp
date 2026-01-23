@@ -20,11 +20,16 @@ $end_info$
 #include <FEXHeaderUtils/Syscalls.h>
 
 #include <fcntl.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+// prctl is defined in LinuxCompat.h for macOS
+#else
 #include <linux/audit.h>
 #include <linux/bpf_common.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <sys/prctl.h>
+#endif
 
 // seccomp
 //
@@ -437,9 +442,16 @@ SeccompEmulator::ExecuteFilter(FEXCore::Core::CpuStateFrame* Frame, uint64_t JIT
       .si_code = 1, // SYS_SECCOMP
     };
 
+#ifdef __APPLE__
+    // macOS siginfo_t doesn't have si_call_addr, si_syscall, si_arch
+    // These fields are Linux SIGSYS specific
+    (void)RIP;
+    (void)Arch;
+#else
     Info.si_call_addr = reinterpret_cast<void*>(RIP);
     Info.si_syscall = Args->Argument[0];
     Info.si_arch = Arch;
+#endif
 
     SignalDelegation->QueueSignal(::getpid(), ::gettid(), SIGSYS, &Info, true);
     break;

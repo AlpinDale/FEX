@@ -15,8 +15,12 @@ $end_info$
 #include <filesystem>
 #include <sys/file.h>
 #include <sys/mman.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <sys/personality.h>
 #include <sys/shm.h>
+#endif
 
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/SignalDelegator.h"
@@ -474,7 +478,7 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
     struct stat64 buf;
     fstat64(fd, &buf);
 
-    const VMATracking::MRID mrid {buf.st_dev, buf.st_ino};
+    const VMATracking::MRID mrid {static_cast<uint64_t>(buf.st_dev), static_cast<uint64_t>(buf.st_ino)};
 
     char Tmp[PATH_MAX];
     auto PathLength = FEX::get_fdpath(fd, Tmp);
@@ -635,7 +639,7 @@ void SyscallHandler::TrackShmat(FEXCore::Core::InternalThreadState* Thread, int 
 }
 
 uint64_t SyscallHandler::TrackShmdt(FEXCore::Core::InternalThreadState* Thread, uint64_t shmaddr) {
-  return VMATracking.DeleteSHMRegion(CTX, reinterpret_cast<uintptr_t>(shmaddr));
+  return VMATracking.DeleteSHMRegion(CTX, static_cast<uintptr_t>(shmaddr));
 }
 
 void SyscallHandler::TrackMadvise(FEXCore::Core::InternalThreadState* Thread, uintptr_t Base, uintptr_t Size, int advice) {

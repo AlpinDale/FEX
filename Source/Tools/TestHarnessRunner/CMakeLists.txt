@@ -1,5 +1,11 @@
 list(APPEND LIBS FEXCore Common JemallocLibs ${PTHREAD_LIB})
 
+# macOS requires Security framework for SecRandomCopyBytes
+if (APPLE)
+  find_library(SECURITY_FRAMEWORK Security)
+  list(APPEND LIBS ${SECURITY_FRAMEWORK})
+endif()
+
 set(SRCS TestHarnessRunner.cpp)
 if (NOT MINGW)
   list(APPEND SRCS TestHarnessRunner/HostRunner.cpp)

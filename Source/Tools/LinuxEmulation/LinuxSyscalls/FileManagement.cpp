@@ -29,18 +29,26 @@ $end_info$
 #include <algorithm>
 #include <errno.h>
 #include <cstring>
-#include <linux/openat2.h>
 #include <fcntl.h>
 #include <filesystem>
 #include <optional>
 #include <stdio.h>
 #include <sys/stat.h>
+#ifndef __APPLE__
 #include <sys/statfs.h>
-#include <sys/xattr.h>
+#include <linux/openat2.h>
 #include <syscall.h>
+#endif
+#include <sys/xattr.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
+
+#ifdef __APPLE__
+// Include LinuxCompat.h after sys/xattr.h to properly wrap xattr functions
+#include "LinuxSyscalls/LinuxCompat.h"
+#include <sys/syscall.h>
+#endif
 
 #include <tiny-json.h>
 
@@ -1044,7 +1052,11 @@ uint64_t FileManager::NewFSStatAt(int dirfd, const char* pathname, struct stat* 
 uint64_t FileManager::NewFSStatAt64(int dirfd, const char* pathname, struct stat64* buf, int flag) {
   if (IsSelfNoFollow(pathname, flag)) {
     // See Statx
+#ifdef __APPLE__
+    return ::fstatat(dirfd, pathname, buf, flag);
+#else
     return ::fstatat64(dirfd, pathname, buf, flag);
+#endif
   }
 
   auto NewPath = GetSelf(pathname);
@@ -1053,12 +1065,20 @@ uint64_t FileManager::NewFSStatAt64(int dirfd, const char* pathname, struct stat
   FDPathTmpData TmpFilename;
   auto Path = GetEmulatedFDPath(dirfd, SelfPath, (flag & AT_SYMLINK_NOFOLLOW) == 0, TmpFilename);
   if (Path.FD != -1) {
+#ifdef __APPLE__
+    uint64_t Result = ::fstatat(Path.FD, Path.Path, buf, flag);
+#else
     uint64_t Result = ::fstatat64(Path.FD, Path.Path, buf, flag);
+#endif
     if (Result != -1) {
       return Result;
     }
   }
+#ifdef __APPLE__
+  return ::fstatat(dirfd, SelfPath, buf, flag);
+#else
   return ::fstatat64(dirfd, SelfPath, buf, flag);
+#endif
 }
 
 uint64_t FileManager::Setxattr(const char* path, const char* name, const void* value, size_t size, int flags) {
@@ -1067,13 +1087,21 @@ uint64_t FileManager::Setxattr(const char* path, const char* name, const void* v
 
   auto Path = GetEmulatedPath(SelfPath, true);
   if (!Path.empty()) {
+#ifdef __APPLE__
+    uint64_t Result = linux_setxattr(Path.c_str(), name, value, size, flags);
+#else
     uint64_t Result = ::setxattr(Path.c_str(), name, value, size, flags);
+#endif
     if (Result != -1 || errno != ENOENT) {
       return Result;
     }
   }
 
+#ifdef __APPLE__
+  return linux_setxattr(SelfPath, name, value, size, flags);
+#else
   return ::setxattr(SelfPath, name, value, size, flags);
+#endif
 }
 
 uint64_t FileManager::LSetxattr(const char* path, const char* name, const void* value, size_t size, int flags) {
@@ -1082,13 +1110,21 @@ uint64_t FileManager::LSetxattr(const char* path, const char* name, const void* 
 
   auto Path = GetEmulatedPath(SelfPath, false);
   if (!Path.empty()) {
+#ifdef __APPLE__
+    uint64_t Result = linux_lsetxattr(Path.c_str(), name, value, size, flags);
+#else
     uint64_t Result = ::lsetxattr(Path.c_str(), name, value, size, flags);
+#endif
     if (Result != -1 || errno != ENOENT) {
       return Result;
     }
   }
 
+#ifdef __APPLE__
+  return linux_lsetxattr(SelfPath, name, value, size, flags);
+#else
   return ::lsetxattr(SelfPath, name, value, size, flags);
+#endif
 }
 
 uint64_t FileManager::Getxattr(const char* path, const char* name, void* value, size_t size) {
@@ -1097,13 +1133,21 @@ uint64_t FileManager::Getxattr(const char* path, const char* name, void* value, 
 
   auto Path = GetEmulatedPath(SelfPath, true);
   if (!Path.empty()) {
+#ifdef __APPLE__
+    uint64_t Result = linux_getxattr(Path.c_str(), name, value, size);
+#else
     uint64_t Result = ::getxattr(Path.c_str(), name, value, size);
+#endif
     if (Result != -1 || errno != ENOENT) {
       return Result;
     }
   }
 
+#ifdef __APPLE__
+  return linux_getxattr(SelfPath, name, value, size);
+#else
   return ::getxattr(SelfPath, name, value, size);
+#endif
 }
 
 uint64_t FileManager::LGetxattr(const char* path, const char* name, void* value, size_t size) {
@@ -1112,13 +1156,21 @@ uint64_t FileManager::LGetxattr(const char* path, const char* name, void* value,
 
   auto Path = GetEmulatedPath(SelfPath, false);
   if (!Path.empty()) {
+#ifdef __APPLE__
+    uint64_t Result = linux_lgetxattr(Path.c_str(), name, value, size);
+#else
     uint64_t Result = ::lgetxattr(Path.c_str(), name, value, size);
+#endif
     if (Result != -1 || errno != ENOENT) {
       return Result;
     }
   }
 
+#ifdef __APPLE__
+  return linux_lgetxattr(SelfPath, name, value, size);
+#else
   return ::lgetxattr(SelfPath, name, value, size);
+#endif
 }
 
 uint64_t FileManager::Listxattr(const char* path, char* list, size_t size) {
@@ -1127,13 +1179,21 @@ uint64_t FileManager::Listxattr(const char* path, char* list, size_t size) {
 
   auto Path = GetEmulatedPath(SelfPath, true);
   if (!Path.empty()) {
+#ifdef __APPLE__
+    uint64_t Result = linux_listxattr(Path.c_str(), list, size);
+#else
     uint64_t Result = ::listxattr(Path.c_str(), list, size);
+#endif
     if (Result != -1 || errno != ENOENT) {
       return Result;
     }
   }
 
+#ifdef __APPLE__
+  return linux_listxattr(SelfPath, list, size);
+#else
   return ::listxattr(SelfPath, list, size);
+#endif
 }
 
 uint64_t FileManager::LListxattr(const char* path, char* list, size_t size) {
@@ -1142,13 +1202,21 @@ uint64_t FileManager::LListxattr(const char* path, char* list, size_t size) {
 
   auto Path = GetEmulatedPath(SelfPath, false);
   if (!Path.empty()) {
+#ifdef __APPLE__
+    uint64_t Result = linux_llistxattr(Path.c_str(), list, size);
+#else
     uint64_t Result = ::llistxattr(Path.c_str(), list, size);
+#endif
     if (Result != -1 || errno != ENOENT) {
       return Result;
     }
   }
 
+#ifdef __APPLE__
+  return linux_llistxattr(SelfPath, list, size);
+#else
   return ::llistxattr(SelfPath, list, size);
+#endif
 }
 
 uint64_t FileManager::Removexattr(const char* path, const char* name) {
@@ -1157,13 +1225,21 @@ uint64_t FileManager::Removexattr(const char* path, const char* name) {
 
   auto Path = GetEmulatedPath(SelfPath, true);
   if (!Path.empty()) {
+#ifdef __APPLE__
+    uint64_t Result = linux_removexattr(Path.c_str(), name);
+#else
     uint64_t Result = ::removexattr(Path.c_str(), name);
+#endif
     if (Result != -1 || errno != ENOENT) {
       return Result;
     }
   }
 
+#ifdef __APPLE__
+  return linux_removexattr(SelfPath, name);
+#else
   return ::removexattr(SelfPath, name);
+#endif
 }
 
 uint64_t FileManager::LRemovexattr(const char* path, const char* name) {
@@ -1172,13 +1248,21 @@ uint64_t FileManager::LRemovexattr(const char* path, const char* name) {
 
   auto Path = GetEmulatedPath(SelfPath, false);
   if (!Path.empty()) {
+#ifdef __APPLE__
+    uint64_t Result = linux_lremovexattr(Path.c_str(), name);
+#else
     uint64_t Result = ::lremovexattr(Path.c_str(), name);
+#endif
     if (Result != -1 || errno != ENOENT) {
       return Result;
     }
   }
 
+#ifdef __APPLE__
+  return linux_lremovexattr(SelfPath, name);
+#else
   return ::lremovexattr(SelfPath, name);
+#endif
 }
 
 uint64_t FileManager::SetxattrAt(int dfd, const char* pathname, uint32_t at_flags, const char* name, const xattr_args* uargs, size_t usize) {

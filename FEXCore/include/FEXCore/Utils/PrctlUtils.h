@@ -2,10 +2,12 @@
 #pragma once
 
 #ifndef _WIN32
+#ifndef __APPLE__
 #include <linux/prctl.h>
-#include <sys/mman.h>
 #include <sys/user.h>
 #include <sys/prctl.h>
+#endif
+#include <sys/mman.h>
 
 #ifndef PR_SET_VMA
 #define PR_SET_VMA 0x53564d41

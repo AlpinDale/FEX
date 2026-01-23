@@ -29,8 +29,16 @@ $end_info$
 #include <optional>
 #include <sys/stat.h>
 
+#ifdef __APPLE__
+#include <signal.h>
+// macOS doesn't have seccomp - provide minimal definitions for compatibility
+#define SECCOMP_MODE_DISABLED 0
+#define SECCOMP_MODE_STRICT 1
+#define SECCOMP_MODE_FILTER 2
+#else
 #include <bits/types/sigset_t.h>
 #include <linux/seccomp.h>
+#endif
 
 namespace FEX::HLE {
 class SignalDelegator;
