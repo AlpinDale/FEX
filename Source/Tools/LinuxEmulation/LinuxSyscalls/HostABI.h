@@ -36,7 +36,18 @@ namespace FEX::HLE::HostABI {
 #if defined(__APPLE__)
 
 // Convert kernel_sigaction to native sigaction for macOS
+// macOS only supports signals 1-31, so signals 32-64 are silently ignored
 inline int rt_sigaction(int signum, const FEX::HLE::kernel_sigaction* act, FEX::HLE::kernel_sigaction* oldact) {
+  // macOS only supports signals 1-31
+  if (signum > 31) {
+    // Return success but don't actually set up a handler for unsupported signals
+    if (oldact) {
+      memset(oldact, 0, sizeof(*oldact));
+      oldact->handler = SIG_DFL;
+    }
+    return 0;
+  }
+
   struct sigaction native_act;
   struct sigaction native_oldact;
   struct sigaction* act_ptr = nullptr;
@@ -190,4 +201,3 @@ inline int faccessat(int dirfd, const char* pathname, int mode) {
 #endif
 
 } // namespace FEX::HLE::HostABI
-

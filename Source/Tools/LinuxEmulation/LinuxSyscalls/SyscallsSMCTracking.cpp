@@ -24,6 +24,7 @@ $end_info$
 
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/SignalDelegator.h"
+#include "LinuxSyscalls/LinuxAllocator.h"
 
 #include <FEXCore/Debug/InternalThreadState.h>
 #include <FEXCore/Utils/LogManager.h>
@@ -148,6 +149,9 @@ void SyscallHandler::MarkGuestExecutableRange(FEXCore::Core::InternalThreadState
           auto VMA = Mapping->second.Resource->FirstVMA;
           LOGMAN_THROW_A_FMT(VMA, "VMA tracking error");
 
+#ifndef __APPLE__
+          // On macOS, MAP_JIT memory cannot have its protection changed with mprotect.
+          // SMC tracking via mprotect is not supported on macOS.
           do {
             auto VMAOffsetBase = VMA->Offset;
             auto VMAOffsetTop = VMA->Offset + VMA->Length;
@@ -162,11 +166,23 @@ void SyscallHandler::MarkGuestExecutableRange(FEXCore::Core::InternalThreadState
               LogMan::Throw::AFmt(rv == 0, "mprotect({}, {}) failed", MirroredBase, MirroredSize);
             }
           } while ((VMA = VMA->ResourceNextVMA));
+#else
+          (void)VMA;
+          (void)OffsetBase;
+          (void)OffsetTop;
+#endif
 
         } else if (Mapping->second.Prot.Writable) {
+#ifndef __APPLE__
+          // On macOS, MAP_JIT memory cannot have its protection changed with mprotect.
+          // SMC tracking via mprotect is not supported on macOS.
           int rv = mprotect((void*)ProtectBase, ProtectSize, PROT_READ);
 
           LogMan::Throw::AFmt(rv == 0, "mprotect({}, {}) failed", ProtectBase, ProtectSize);
+#else
+          (void)ProtectBase;
+          (void)ProtectSize;
+#endif
         }
       }
     }
@@ -264,18 +280,182 @@ void* SyscallHandler::GuestMmap(bool Is64Bit, FEXCore::Core::InternalThreadState
     //       us to be more optimal by using GuardSignalDeferringSection instead
     auto lk = FEXCore::GuardSignalDeferringSectionWithFallback(VMATracking.Mutex, Thread);
 
+#ifdef __APPLE__
+    // On macOS, filter out Linux-specific flags BEFORE checking for MAP_32BIT
+    // because some Linux flags (like MAP_NORESERVE=0x4000) may have different values
+    // that conflict with X86_64_MAP_32BIT on macOS (where MAP_NORESERVE=0x40).
+    // The flags value here uses Linux definitions from LinuxCompat.h.
+    int filtered_flags = flags;
+    filtered_flags &= ~MAP_GROWSDOWN;  // Linux 0x0100
+    filtered_flags &= ~MAP_NORESERVE;  // Linux 0x4000 (note: macOS MAP_NORESERVE is 0x40!)
+    filtered_flags &= ~MAP_STACK;      // Linux 0x20000
+    bool Map32Bit = !Is64Bit || (filtered_flags & FEX::HLE::X86_64_MAP_32BIT);
+#else
     bool Map32Bit = !Is64Bit || (flags & FEX::HLE::X86_64_MAP_32BIT);
+#endif
+    LogMan::Msg::DFmt("GuestMmap: addr=0x{:x} len=0x{:x} prot=0x{:x} flags=0x{:x} Is64Bit={} Map32Bit={}",
+                      reinterpret_cast<uint64_t>(addr), length, prot, flags, Is64Bit, Map32Bit);
     if (Map32Bit) {
       Result = (uint64_t)Get32BitAllocator()->Mmap((void*)addr, length, prot, flags, fd, offset);
+      LogMan::Msg::DFmt("32bit mmap result: 0x{:x}", Result);
       if (FEX::HLE::HasSyscallError(Result)) {
         return reinterpret_cast<void*>(Result);
       }
       LOGMAN_THROW_A_FMT(Is64Bit || (Result >> 32) == 0 || (Result >> 32) == 0xFFFFFFFF, "values must fit to 32 bits");
     } else {
+#ifdef __APPLE__
+      // On macOS, executable memory requires MAP_JIT flag, but MAP_JIT is incompatible with MAP_FIXED.
+      // For executable mappings, we must remove MAP_FIXED and let macOS choose the address.
+      // Also filter out Linux-specific flags that macOS doesn't understand.
+      int macos_flags = flags;
+
+      // Translate Linux mmap flags to macOS flags
+      // The incoming flags may use Linux definitions (from guest syscalls via ELF loader)
+      // or macOS definitions (from internal FEX code).
+      //
+      // Key differences:
+      // - Linux MAP_ANONYMOUS = 0x20, macOS MAP_ANONYMOUS = 0x1000
+      // - Linux MAP_DENYWRITE = 0x0800, macOS MAP_JIT = 0x0800 (CONFLICT!)
+      // - Linux MAP_EXECUTABLE = 0x1000 = macOS MAP_ANONYMOUS (CONFLICT!)
+      // - Linux MAP_GROWSDOWN = 0x0100, MAP_STACK = 0x20000, etc. (not on macOS)
+
+      constexpr int LINUX_MAP_ANONYMOUS = 0x20;
+      constexpr int LINUX_MAP_GROWSDOWN = 0x0100;
+      constexpr int LINUX_MAP_DENYWRITE = 0x0800;
+      // Note: LINUX_MAP_EXECUTABLE = 0x1000 = macOS MAP_ANONYMOUS, so we can't blindly remove it
+      constexpr int LINUX_MAP_LOCKED = 0x2000;
+      constexpr int LINUX_MAP_NORESERVE = 0x4000;
+      constexpr int LINUX_MAP_POPULATE = 0x8000;
+      constexpr int LINUX_MAP_NONBLOCK = 0x10000;
+      constexpr int LINUX_MAP_STACK = 0x20000;
+      constexpr int LINUX_MAP_HUGETLB = 0x40000;
+
+      // Check if this looks like Linux flags (has Linux MAP_ANONYMOUS = 0x20 set)
+      bool has_linux_anonymous = (macos_flags & LINUX_MAP_ANONYMOUS) != 0;
+
+      // Build translated flags
+      int translated_flags = macos_flags;
+
+      // If using Linux MAP_ANONYMOUS (0x20), convert to macOS MAP_ANONYMOUS (0x1000)
+      // Also: If Linux MAP_ANONYMOUS is set, then 0x1000 means LINUX_MAP_EXECUTABLE, not macOS MAP_ANONYMOUS
+      if (has_linux_anonymous) {
+        translated_flags &= ~LINUX_MAP_ANONYMOUS;
+        translated_flags |= MAP_ANONYMOUS;
+        // In this case, 0x1000 (if present) is Linux MAP_EXECUTABLE, remove it
+        translated_flags &= ~0x1000;  // Remove LINUX_MAP_EXECUTABLE
+        translated_flags |= MAP_ANONYMOUS; // Re-add macOS MAP_ANONYMOUS
+      }
+      // If Linux MAP_ANONYMOUS (0x20) is NOT set, then 0x1000 is macOS MAP_ANONYMOUS - keep it
+
+      // Remove Linux-specific flags that conflict with or don't exist on macOS
+      translated_flags &= ~LINUX_MAP_GROWSDOWN;
+      translated_flags &= ~LINUX_MAP_DENYWRITE;   // Conflicts with macOS MAP_JIT!
+      translated_flags &= ~LINUX_MAP_LOCKED;
+      translated_flags &= ~LINUX_MAP_NORESERVE;
+      translated_flags &= ~LINUX_MAP_POPULATE;
+      translated_flags &= ~LINUX_MAP_NONBLOCK;
+      translated_flags &= ~LINUX_MAP_STACK;
+      translated_flags &= ~LINUX_MAP_HUGETLB;
+
+      macos_flags = translated_flags;
+
+      // Only use MAP_JIT for anonymous executable mappings (JIT code).
+      // File-backed executable mappings (loading ELF files) can use regular mmap + mprotect.
+      bool is_anonymous = (macos_flags & MAP_ANONYMOUS) != 0;
+      bool needs_exec = (prot & PROT_EXEC) != 0;
+      bool needs_jit = is_anonymous && needs_exec;
+
+      if (needs_jit) {
+        macos_flags |= MAP_JIT;
+        macos_flags &= ~MAP_FIXED; // MAP_JIT cannot be combined with MAP_FIXED
+      }
+
+      // macOS ARM64 uses 16KB pages, but Linux ELF files have 4KB-aligned sections.
+      // We need to handle file-backed mappings with non-16KB-aligned offsets by using
+      // anonymous memory + pread instead of direct file mapping.
+      constexpr size_t MACOS_PAGE_SIZE = 16384;  // 16KB
+      bool offset_needs_workaround = (fd >= 0) && ((offset % MACOS_PAGE_SIZE) != 0);
+
+      // Check if address also needs alignment workaround
+      uintptr_t requested_addr = reinterpret_cast<uintptr_t>(addr);
+      bool addr_needs_alignment = (requested_addr != 0) && ((requested_addr % MACOS_PAGE_SIZE) != 0);
+
+      if (offset_needs_workaround || addr_needs_alignment) {
+        // Either offset or address is not 16KB-aligned.
+        // We need to:
+        // 1. Round down the address to 16KB boundary
+        // 2. Calculate the padding needed
+        // 3. Allocate at the aligned address with extra size
+        // 4. Read file data at the correct offset within the allocation
+
+        uintptr_t aligned_addr = requested_addr & ~(MACOS_PAGE_SIZE - 1);  // Round down to 16KB
+        size_t addr_padding = requested_addr - aligned_addr;
+        size_t aligned_length = length + addr_padding;
+        // Round up length to 16KB boundary
+        aligned_length = (aligned_length + MACOS_PAGE_SIZE - 1) & ~(MACOS_PAGE_SIZE - 1);
+
+        // Keep MAP_FIXED if originally requested, just change to anonymous
+        int anon_flags = macos_flags | MAP_ANONYMOUS;
+        int alloc_prot = PROT_READ | PROT_WRITE;  // Need write to copy data
+
+        Result = reinterpret_cast<uint64_t>(::mmap(reinterpret_cast<void*>(aligned_addr), aligned_length, alloc_prot, anon_flags, -1, 0));
+
+        if (Result != ~0ULL) {
+          // Read file data at the correct offset within the allocation
+          if (fd >= 0) {
+            ssize_t bytes_read = ::pread(fd, reinterpret_cast<void*>(Result + addr_padding), length, offset);
+            if (bytes_read < 0) {
+              int saved_errno = errno;
+              LogMan::Msg::EFmt("GuestMmap: pread failed: {}", strerror(saved_errno));
+              ::munmap(reinterpret_cast<void*>(Result), aligned_length);
+              return reinterpret_cast<void*>(-saved_errno);
+            }
+          }
+
+          // Set the correct protection for the entire aligned region
+          if (prot != alloc_prot) {
+            if (::mprotect(reinterpret_cast<void*>(Result), aligned_length, prot) != 0) {
+              int saved_errno = errno;
+              LogMan::Msg::EFmt("GuestMmap: mprotect failed: {}", strerror(saved_errno));
+              ::munmap(reinterpret_cast<void*>(Result), aligned_length);
+              return reinterpret_cast<void*>(-saved_errno);
+            }
+          }
+
+          // Return the address the caller requested (may be in the middle of the allocation)
+          Result = Result + addr_padding;
+        }
+      } else if (!needs_jit && needs_exec && fd >= 0) {
+        // For file-backed executable mappings, map as RW first, then mprotect to RX
+        // This works around macOS restrictions on directly mapping executable memory from files
+        int initial_prot = (prot & ~PROT_EXEC) | PROT_WRITE;
+        Result = reinterpret_cast<uint64_t>(::mmap(reinterpret_cast<void*>(addr), length, initial_prot, macos_flags, fd, offset));
+        if (Result != ~0ULL) {
+          // Now change protection to the requested executable permission
+          if (::mprotect(reinterpret_cast<void*>(Result), length, prot) != 0) {
+            int saved_errno = errno;
+            LogMan::Msg::EFmt("mprotect to RX failed: {}", strerror(saved_errno));
+            ::munmap(reinterpret_cast<void*>(Result), length);
+            return reinterpret_cast<void*>(-saved_errno);
+          }
+        }
+      } else {
+        Result = reinterpret_cast<uint64_t>(::mmap(reinterpret_cast<void*>(addr), length, prot, macos_flags, fd, offset));
+      }
+      if (Result == ~0ULL) {
+        int saved_errno = errno;
+        LogMan::Msg::EFmt("mmap failed at 0x{:x}, size 0x{:x}, prot 0x{:x}, flags 0x{:x}: {}", reinterpret_cast<uint64_t>(addr), length,
+                          prot, macos_flags, strerror(saved_errno));
+        return reinterpret_cast<void*>(-saved_errno);
+      }
+      LogMan::Msg::DFmt("mmap(0x{:x}, 0x{:x}, 0x{:x}, 0x{:x}) -> 0x{:x}", reinterpret_cast<uint64_t>(addr), length, prot, macos_flags, Result);
+      // Note: With MAP_JIT, the actual address may differ from the requested address
+#else
       Result = reinterpret_cast<uint64_t>(::mmap(reinterpret_cast<void*>(addr), length, prot, flags, fd, offset));
       if (Result == ~0ULL) {
         return reinterpret_cast<void*>(-errno);
       }
+#endif
     }
 
     LateMetadata = TrackMmap(Thread, Result, length, prot, flags, fd, offset, CachedSection);

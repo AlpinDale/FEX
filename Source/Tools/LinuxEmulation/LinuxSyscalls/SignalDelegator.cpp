@@ -8,6 +8,7 @@ $end_info$
 
 #include "LinuxSyscalls/SignalDelegator.h"
 #include "LinuxSyscalls/Syscalls.h"
+#include "LinuxSyscalls/HostABI.h"
 
 #include <FEXCore/Core/Context.h>
 #include <FEXCore/Core/CoreState.h>
@@ -58,10 +59,19 @@ __attribute__((naked)) static void sigrestore() {
 
 constexpr static uint32_t X86_MINSIGSTKSZ = 2048;
 
-static FEX::HLE::ThreadStateObject* GetThreadFromAltStack(const stack_t& alt_stack) {
+static FEX::HLE::ThreadStateObject* GetThreadFromAltStack([[maybe_unused]] const stack_t& alt_stack) {
   // The thread object lives just before the alt-stack begin.
   FEX::HLE::ThreadStateObject* ThreadObject {};
+
+#ifdef __APPLE__
+  // On macOS, uc_stack.ss_sp contains the current stack pointer within the alternate stack,
+  // not the base address. We need to call sigaltstack() to get the actual base address.
+  stack_t current_stack;
+  sigaltstack(nullptr, &current_stack);
+  memcpy(&ThreadObject, reinterpret_cast<void*>(reinterpret_cast<uint64_t>(current_stack.ss_sp) - 8), sizeof(void*));
+#else
   memcpy(&ThreadObject, reinterpret_cast<void*>(reinterpret_cast<uint64_t>(alt_stack.ss_sp) - 8), sizeof(void*));
+#endif
   return ThreadObject;
 }
 
@@ -836,8 +846,7 @@ bool SignalDelegator::UpdateHostThunk(int Signal) {
   }
 
   // Only update the old action if we haven't ever been installed
-  const int Result =
-    ::syscall(SYS_rt_sigaction, Signal, &SignalHandler.HostAction, SignalHandler.Installed ? nullptr : &SignalHandler.OldAction, 8);
+  const int Result = HostABI::rt_sigaction(Signal, &SignalHandler.HostAction, SignalHandler.Installed ? nullptr : &SignalHandler.OldAction);
   if (Result < 0) {
     // Signal 32 and 33 are consumed by glibc. We don't handle this atm
     LogMan::Msg::AFmt("Failed to install host signal thunk for signal {}: {}", Signal, strerror(errno));
@@ -850,7 +859,7 @@ bool SignalDelegator::UpdateHostThunk(int Signal) {
 void SignalDelegator::UninstallHostHandler(int Signal) {
   SignalHandler& SignalHandler = HostHandlers[Signal];
 
-  ::syscall(SYS_rt_sigaction, Signal, &SignalHandler.OldAction, nullptr, 8);
+  HostABI::rt_sigaction(Signal, &SignalHandler.OldAction, nullptr);
 }
 
 void SignalDelegator::QueueSignal(pid_t tgid, pid_t tid, int Signal, siginfo_t* info, bool IgnoreMask) {
@@ -858,32 +867,32 @@ void SignalDelegator::QueueSignal(pid_t tgid, pid_t tid, int Signal, siginfo_t* 
   bool WasMasked {};
   SignalHandler& SignalHandler = HostHandlers[Signal];
   if (SignalHandler.GuestAction.sigaction_handler.handler == SIG_IGN && IgnoreMask) {
-    ::syscall(SYS_rt_sigaction, Signal, &SignalHandler.OldAction, nullptr, 8);
+    HostABI::rt_sigaction(Signal, &SignalHandler.OldAction, nullptr);
     WasIgnored = true;
   }
 
   // Get the current host signal mask
   uint64_t ThreadSignalMask {};
   const uint64_t SignalMask = 1ULL << (Signal - 1);
-  ::syscall(SYS_rt_sigprocmask, 0, nullptr, &ThreadSignalMask, 8);
+  HostABI::rt_sigprocmask(0, nullptr, &ThreadSignalMask, 8);
   if (ThreadSignalMask & SignalMask) {
     WasMasked = true;
 
     // Signal currently masked, unmask
     ThreadSignalMask &= ~SignalMask;
-    ::syscall(SYS_rt_sigprocmask, 0, &ThreadSignalMask, &ThreadSignalMask, 8);
+    HostABI::rt_sigprocmask(0, &ThreadSignalMask, &ThreadSignalMask, 8);
   }
 
-  ::syscall(SYSCALL_DEF(rt_tgsigqueueinfo), tgid, tid, Signal, info);
+  HostABI::rt_tgsigqueueinfo(tgid, tid, Signal, info);
 
   if (WasMasked) {
     // Mask again
-    ::syscall(SYS_rt_sigprocmask, 0, &ThreadSignalMask, nullptr, 8);
+    HostABI::rt_sigprocmask(0, &ThreadSignalMask, nullptr, 8);
   }
 
   if (WasIgnored) {
     // Ignore again
-    ::syscall(SYS_rt_sigaction, Signal, &SignalHandler.HostAction, nullptr, 8);
+    HostABI::rt_sigaction(Signal, &SignalHandler.HostAction, nullptr);
   }
 }
 
@@ -1014,7 +1023,7 @@ SignalDelegator::~SignalDelegator() {
     if (i == 0 || i == SIGKILL || i == SIGSTOP || !HostHandlers[i].Installed) {
       continue;
     }
-    ::syscall(SYS_rt_sigaction, i, &HostHandlers[i].OldAction, nullptr, 8);
+    HostABI::rt_sigaction(i, &HostHandlers[i].OldAction, nullptr);
     HostHandlers[i].Installed = false;
   }
 }
@@ -1047,7 +1056,7 @@ void SignalDelegator::RegisterTLSState(FEX::HLE::ThreadStateObject* Thread) {
   }
 
   // Get the current host signal mask
-  ::syscall(SYS_rt_sigprocmask, 0, nullptr, &Thread->SignalInfo.CurrentSignalMask.Val, 8);
+  HostABI::rt_sigprocmask(0, nullptr, &Thread->SignalInfo.CurrentSignalMask.Val, 8);
 
   if (Thread->Thread) {
     // Reserve a small amount of deferred signal frames. Usually the stack won't be utilized beyond
@@ -1138,7 +1147,7 @@ void SignalDelegator::CheckXIDHandler() {
   kernel_sigaction CurrentAction {};
 
   // Only update the old action if we haven't ever been installed
-  const int Result = ::syscall(SYS_rt_sigaction, SIGNAL_SETXID, nullptr, &CurrentAction, 8);
+  const int Result = HostABI::rt_sigaction(SIGNAL_SETXID, nullptr, &CurrentAction);
   if (Result < 0) {
     LogMan::Msg::AFmt("Failed to get status of XID signal");
     return;
@@ -1147,7 +1156,7 @@ void SignalDelegator::CheckXIDHandler() {
   SignalHandler& HostHandler = HostHandlers[SIGNAL_SETXID];
   if (CurrentAction.handler != HostHandler.HostAction.handler) {
     // GLIBC overwrote our XID handler, reinstate our handler
-    const int Result = ::syscall(SYS_rt_sigaction, SIGNAL_SETXID, &HostHandler.HostAction, nullptr, 8);
+    const int Result = HostABI::rt_sigaction(SIGNAL_SETXID, &HostHandler.HostAction, nullptr);
     if (Result < 0) {
       LogMan::Msg::AFmt("Failed to reinstate our XID signal handler {}", strerror(errno));
     }
@@ -1254,7 +1263,7 @@ uint64_t SignalDelegator::GuestSigProcMask(FEX::HLE::ThreadStateObject* Thread, 
       }
     }
 
-    ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &HostMask, nullptr, 8);
+    HostABI::rt_sigprocmask(SIG_SETMASK, &HostMask, nullptr, 8);
   }
 
   if (!!oldset) {
@@ -1334,7 +1343,7 @@ uint64_t SignalDelegator::GuestSigTimedWait(uint64_t* set, siginfo_t* info, cons
     return -EINVAL;
   }
 
-  uint64_t Result = ::syscall(SYS_rt_sigtimedwait, set, info, timeout);
+  int Result = HostABI::rt_sigtimedwait(set, info, timeout);
 
   return Result == -1 ? -errno : Result;
 }

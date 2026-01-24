@@ -178,6 +178,16 @@ FEX::HLE::ThreadStateObject* ThreadManager::CreateThread(uint64_t InitialRIP, ui
   ThreadStateObject->Thread = CTX->CreateThread(InitialRIP, StackPointer, NewThreadState);
   auto Frame = ThreadStateObject->Thread->CurrentFrame;
 
+#ifdef __APPLE__
+  // On macOS, we cannot use mprotect to change part of a mapping's protection.
+  // Allocate the call-ret stack directly with PROT_READ | PROT_WRITE (no guard pages).
+  // This is less safe but functional.
+  auto AllocBase =
+    reinterpret_cast<uint64_t>(FEXCore::Allocator::mmap(nullptr, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE,
+                                                         PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  FEXCore::Allocator::VirtualName("FEXMem_Misc", reinterpret_cast<void*>(AllocBase), FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
+  ThreadStateObject->Thread->CallRetStackBase = reinterpret_cast<void*>(AllocBase);
+#else
   // Allocate the call-ret stack with guard pages on both sides
   auto AllocBase =
     reinterpret_cast<uint64_t>(FEXCore::Allocator::mmap(nullptr, CALLRET_STACK_ALLOC_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
@@ -187,6 +197,7 @@ FEX::HLE::ThreadStateObject* ThreadManager::CreateThread(uint64_t InitialRIP, ui
   // Set the base used for invalidation to the start past the guard pages
   ThreadStateObject->Thread->CallRetStackBase = reinterpret_cast<void*>(AllocBase + FEXCore::Utils::FEX_PAGE_SIZE);
   ::mprotect(ThreadStateObject->Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE, PROT_READ | PROT_WRITE);
+#endif
   Frame->State.callret_sp = ThreadStateObject->GetCallRetStackInfo().DefaultLocation;
 
   ThreadStateObject->Thread->FrontendPtr = ThreadStateObject;

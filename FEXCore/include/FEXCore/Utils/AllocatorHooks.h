@@ -28,6 +28,35 @@
 #include <sys/types.h>
 
 namespace FEXCore::Allocator {
+
+// JIT write protection helpers for macOS W^X enforcement
+// On macOS with MAP_JIT memory, we must toggle between write and execute modes
+// using pthread_jit_write_protect_np(). These helpers provide a cross-platform interface.
+#ifdef __APPLE__
+inline void SetJITWritable() {
+  pthread_jit_write_protect_np(false);
+}
+inline void SetJITExecutable() {
+  pthread_jit_write_protect_np(true);
+}
+#else
+inline void SetJITWritable() {}
+inline void SetJITExecutable() {}
+#endif
+
+// RAII helper for scoped JIT write access
+class ScopedJITWrite {
+public:
+  ScopedJITWrite() {
+    SetJITWritable();
+  }
+  ~ScopedJITWrite() {
+    SetJITExecutable();
+  }
+  ScopedJITWrite(const ScopedJITWrite&) = delete;
+  ScopedJITWrite& operator=(const ScopedJITWrite&) = delete;
+};
+
 enum class ProtectOptions : uint32_t {
   None = 0,
   Read = (1U << 0),
@@ -109,8 +138,6 @@ inline void* VirtualAlloc(size_t Size, bool Execute = false, bool Commit = true)
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
   if (Execute) {
     flags |= MAP_JIT;
-    // Disable JIT write protection for this thread so we can write to JIT memory
-    pthread_jit_write_protect_np(false);
   }
   return FEXCore::Allocator::mmap(nullptr, Size, PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0), flags, -1, 0);
 #else
@@ -124,8 +151,6 @@ inline void* VirtualAlloc(void* Base, size_t Size, bool Execute = false, bool Co
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
   if (Execute) {
     flags |= MAP_JIT;
-    // Disable JIT write protection for this thread so we can write to JIT memory
-    pthread_jit_write_protect_np(false);
   }
   return FEXCore::Allocator::mmap(Base, Size, PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0), flags, -1, 0);
 #else

@@ -245,6 +245,16 @@ class ELFCodeLoader final : public FEX::CodeLoader {
         return {};
       }
 
+#ifdef __APPLE__
+      // On macOS, we cannot use MAP_FIXED to replace portions of an existing mapping,
+      // and we cannot munmap portions of a mapping either. The workaround is:
+      // 1. Allocate a region to find a suitable address (done above)
+      // 2. Immediately unmap the entire region
+      // 3. Map individual segments with MAP_FIXED to the now-free addresses
+      // This works because MAP_FIXED on an unmapped address succeeds on macOS.
+      Handler->GuestMunmap(Thread, reinterpret_cast<void*>(LoadBase), TotalSize);
+#endif
+
       // fprintf(stderr, "elf %d: %lx-%lx\n", Elf.fd, LoadBase, LoadBase + TotalSize);
       if (BrkBase) {
         BrkLoadBase = LoadBase + (TotalSize - BRK_SIZE);
@@ -567,6 +577,12 @@ public:
       LogMan::Msg::EFmt("Allocating stack failed");
       return false;
     }
+
+#ifdef __APPLE__
+    // On macOS, we cannot use MAP_FIXED to replace portions of an existing mapping.
+    // Unmap the entire stack region first, then remap just the usable portion.
+    Handler->GuestMunmap(Thread, StackPointerBase, FULL_STACK_SIZE);
+#endif
 
     // Allocate with permissions the 8MB of regular stack size.
     StackPointer = reinterpret_cast<uintptr_t>(Handler->GuestMmap(

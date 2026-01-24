@@ -311,7 +311,13 @@ int main(int argc, char** argv, char** const envp) {
   auto DoMmap = [&](uint64_t Address, size_t Size) -> void* {
     void* Result = SyscallHandler->GuestMmap(nullptr, (void*)Address, Size, PROT_READ | PROT_WRITE | PROT_EXEC,
                                              MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0);
+#ifdef __APPLE__
+    // On macOS, MAP_JIT + PROT_EXEC requires the system to choose the address, so we can't use MAP_FIXED.
+    // Accept any valid allocation for executable memory.
+    LOGMAN_THROW_A_FMT(!FEX::HLE::HasSyscallError(reinterpret_cast<uint64_t>(Result)), "Map Memory mmap failed");
+#else
     LOGMAN_THROW_A_FMT(Result == reinterpret_cast<void*>(Address), "Map Memory mmap failed");
+#endif
     return Result;
   };
 
