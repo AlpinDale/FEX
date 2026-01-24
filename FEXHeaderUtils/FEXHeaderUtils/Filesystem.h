@@ -10,8 +10,13 @@
 #include <memory_resource>
 #include <string_view>
 #ifndef _WIN32
+#ifdef __APPLE__
+#include <limits.h>
+#include <copyfile.h>
+#else
 #include <linux/limits.h>
 #include <sys/sendfile.h>
+#endif
 #else
 #include <filesystem>
 #endif
@@ -191,7 +196,7 @@ inline bool CopyFile(const fextl::string& From, const fextl::string& To, CopyOpt
   }
 
   if (Options == CopyOptions::OVERWRITE_EXISTING && DestExists) {
-    // If we are overwriting and the file exists then we want to use `sendfile` to overwrite
+    // If we are overwriting and the file exists then we want to copy the file contents
     int SourceFD = open(From.c_str(), O_RDONLY | O_CLOEXEC);
     if (SourceFD == -1) {
       return false;
@@ -216,7 +221,12 @@ inline bool CopyFile(const fextl::string& From, const fextl::string& To, CopyOpt
       close(SourceFD);
       return false;
     }
+#ifdef __APPLE__
+    // macOS: use fcopyfile for efficient file copying
+    bool Result = fcopyfile(SourceFD, DestinationFD, nullptr, COPYFILE_DATA) == 0;
+#else
     bool Result = sendfile(DestinationFD, SourceFD, nullptr, buf.st_size) == buf.st_size;
+#endif
     close(DestinationFD);
     close(SourceFD);
     return Result;

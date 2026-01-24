@@ -8,6 +8,21 @@
 #include <vector>
 #include <xxhash.h>
 
+#ifdef __APPLE__
+// posix_fadvise not available on macOS
+#ifndef POSIX_FADV_SEQUENTIAL
+#define POSIX_FADV_SEQUENTIAL 2
+#endif
+// stub, no-op on macOS
+static inline int posix_fadvise(int fd, off_t offset, off_t len, int advice) {
+  (void)fd;
+  (void)offset;
+  (void)len;
+  (void)advice;
+  return 0;
+}
+#endif
+
 namespace XXFileHash {
 // 32MB blocks
 constexpr static size_t BLOCK_SIZE = 32 * 1024 * 1024;

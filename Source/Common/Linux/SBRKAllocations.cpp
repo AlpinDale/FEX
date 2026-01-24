@@ -4,10 +4,26 @@
 #include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/MathUtils.h>
 #include <FEXCore/Utils/TypeDefines.h>
+#include <FEXHeaderUtils/Platform.h>
 
 #include <sys/mman.h>
 
 namespace FEX::SBRKAllocations {
+
+#ifdef __APPLE__
+// macOS doesn't use sbrk-based allocation, and sbrk is deprecated.
+// These functions are no-ops on macOS.
+void* DisableSBRKAllocations() {
+  // macOS uses mmap for memory allocation, sbrk is not used.
+  return reinterpret_cast<void*>(~0ULL);
+}
+
+void ReenableSBRKAllocations(void* Ptr) {
+  // No-op on macOS
+  (void)Ptr;
+}
+
+#else
 // This function disables glibc's ability to allocate memory through the `sbrk` interface.
 // This is run early in the lifecycle of FEX in order to make sure no 64-bit pointers can make it to the guest 32-bit application.
 //
@@ -55,4 +71,6 @@ void ReenableSBRKAllocations(void* Ptr) {
     munmap(Ptr, FEXCore::Utils::FEX_PAGE_SIZE);
   }
 }
+#endif
+
 } // namespace FEX::SBRKAllocations

@@ -8,6 +8,10 @@ $end_info$
 
 #include "CodeLoader.h"
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
+
 #include "Common/CPUInfo.h"
 #include "Common/FDUtils.h"
 #include "LinuxSyscalls/Syscalls.h"

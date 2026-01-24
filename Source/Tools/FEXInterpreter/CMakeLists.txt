@@ -1,6 +1,12 @@
 list(APPEND LIBS FEXCore Common JemallocLibs LinuxEmulation
   CommonTools ${PTHREAD_LIB} fmt::fmt)
 
+# macOS requires Security framework for SecRandomCopyBytes
+if (APPLE)
+  find_library(SECURITY_FRAMEWORK Security)
+  list(APPEND LIBS ${SECURITY_FRAMEWORK})
+endif()
+
 set(DEFINES)
 if (ENABLE_VIXL_SIMULATOR)
   list(APPEND DEFINES -DVIXL_SIMULATOR=1)

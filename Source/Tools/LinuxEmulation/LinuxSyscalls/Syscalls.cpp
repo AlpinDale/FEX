@@ -42,11 +42,17 @@ $end_info$
 #include <FEXHeaderUtils/Syscalls.h>
 
 #include <algorithm>
+#ifndef __APPLE__
 #include <alloca.h>
+#endif
 #include <charconv>
 #include <functional>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <linux/audit.h>
 #include <linux/seccomp.h>
+#endif
 #include <memory>
 #include <regex>
 #include <sched.h>
@@ -57,7 +63,11 @@ $end_info$
 #include <string.h>
 #include <signal.h>
 #include <system_error>
+#ifdef __APPLE__
+#include <sys/syscall.h>
+#else
 #include <syscall.h>
+#endif
 #include <sys/mman.h>
 #include <sys/utsname.h>
 #include <unistd.h>

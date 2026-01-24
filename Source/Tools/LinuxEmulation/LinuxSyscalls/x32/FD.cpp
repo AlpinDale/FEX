@@ -27,14 +27,19 @@ $end_info$
 #include <stddef.h>
 #include <string.h>
 #include <sys/select.h>
+#ifndef __APPLE__
 #include <sys/sendfile.h>
-#include <sys/stat.h>
 #include <sys/statfs.h>
-#include <sys/time.h>
 #include <sys/timerfd.h>
+#include <syscall.h>
+#else
+#include "LinuxSyscalls/LinuxCompat.h"
+#include <sys/syscall.h>
+#endif
+#include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/uio.h>
-#include <syscall.h>
 #include <time.h>
 #include <type_traits>
 #include <unistd.h>
@@ -468,8 +473,14 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
   REGISTER_SYSCALL_IMPL_X32(fstatfs64, [](FEXCore::Core::CpuStateFrame* Frame, int fd, size_t sz, struct statfs64_32* buf) -> uint64_t {
     LOGMAN_THROW_A_FMT(sz == sizeof(struct statfs64_32), "This needs to match");
 
+#ifdef __APPLE__
+    // macOS doesn't have fstatfs64, use fstatfs which is already 64-bit capable
+    struct statfs host_stat;
+    uint64_t Result = ::fstatfs(fd, &host_stat);
+#else
     struct statfs64 host_stat;
     uint64_t Result = ::fstatfs64(fd, &host_stat);
+#endif
     if (Result != -1) {
       FaultSafeUserMemAccess::VerifyIsWritable(buf, sizeof(*buf));
       *buf = host_stat;
@@ -589,7 +600,12 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
                             });
 
   REGISTER_SYSCALL_IMPL_X32(fstatat_64, [](FEXCore::Core::CpuStateFrame* Frame, int dirfd, const char* pathname, stat64_32* buf, int flag) -> uint64_t {
+#ifdef __APPLE__
+    // macOS uses struct stat which is already 64-bit capable
+    struct stat host_stat;
+#else
     struct stat64 host_stat;
+#endif
     uint64_t Result = FEX::HLE::_SyscallHandler->FM.NewFSStatAt64(dirfd, pathname, &host_stat, flag);
     if (Result != -1) {
       FaultSafeUserMemAccess::VerifyIsWritable(buf, sizeof(*buf));
@@ -750,7 +766,7 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
       uint64_t Offset = offset_high;
       Offset <<= 32;
       Offset |= offset_low;
-      uint64_t Result = ::posix_fadvise64(fd, Offset, len, advice);
+      uint64_t Result = posix_fadvise(fd, Offset, len, advice);
       SYSCALL_ERRNO();
     });
 
@@ -763,7 +779,7 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
                               uint64_t Len = len_high;
                               Len <<= 32;
                               Len |= len_low;
-                              uint64_t Result = ::posix_fadvise64(fd, Offset, Len, advice);
+                              uint64_t Result = posix_fadvise(fd, Offset, Len, advice);
                               SYSCALL_ERRNO();
                             });
 
@@ -926,7 +942,7 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
       Offset <<= 32;
       Offset |= offset_low;
 
-      uint64_t Result = ::pread64(fd, buf, count, Offset);
+      uint64_t Result = pread(fd, buf, count, Offset);
       SYSCALL_ERRNO();
     });
 
@@ -936,7 +952,7 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
       Offset <<= 32;
       Offset |= offset_low;
 
-      uint64_t Result = ::pwrite64(fd, buf, count, Offset);
+      uint64_t Result = pwrite(fd, buf, count, Offset);
       SYSCALL_ERRNO();
     });
 
@@ -946,7 +962,7 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
       Offset <<= 32;
       Offset |= offset_low;
 
-      uint64_t Result = ::readahead(fd, Offset, count);
+      uint64_t Result = readahead(fd, Offset, count);
       SYSCALL_ERRNO();
     });
 
@@ -977,7 +993,7 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
                               Len <<= 32;
                               Len |= len_low;
 
-                              uint64_t Result = ::fallocate(fd, mode, Offset, Len);
+                              uint64_t Result = fallocate(fd, mode, Offset, Len);
                               SYSCALL_ERRNO();
                             });
 
@@ -985,7 +1001,7 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
     vmsplice, [](FEXCore::Core::CpuStateFrame* Frame, int fd, const struct iovec32* iov, unsigned long nr_segs, unsigned int flags) -> uint64_t {
       FaultSafeUserMemAccess::VerifyIsReadable(iov, sizeof(struct iovec32) * SanitizeIOCount(nr_segs));
       fextl::vector<iovec> Host_iovec(iov, iov + nr_segs);
-      uint64_t Result = ::vmsplice(fd, Host_iovec.data(), nr_segs, flags);
+      uint64_t Result = vmsplice(fd, Host_iovec.data(), nr_segs, flags);
       SYSCALL_ERRNO();
     });
 }

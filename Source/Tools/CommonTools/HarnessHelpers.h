@@ -13,6 +13,7 @@
 #include <FEXCore/Core/CoreState.h>
 #include <FEXCore/Core/X86Enums.h>
 #include <FEXCore/Utils/Allocator.h>
+#include <FEXCore/Utils/AllocatorHooks.h>
 #include <FEXCore/Utils/CompilerDefs.h>
 #include <FEXCore/Utils/FileLoading.h>
 #include <FEXCore/Utils/LogManager.h>
@@ -469,6 +470,19 @@ public:
       AllocPageSize = FEXCore::Utils::FEX_PAGE_SIZE;
     }
 
+#ifdef __APPLE__
+    // macOS PAGEZERO prevents mapping below 4GB for 64-bit processes.
+    // Use high addresses that are typically available on macOS.
+    // macOS user space usually starts around 0x100000000 (4GB+) for code
+    // We'll use addresses around 0x200000000 (8GB) for scratch memory.
+    if (LimitedSize) {
+      DoMMap(0x2'0000'0000ULL, AllocPageSize * 10);
+      DoMMap(0x2'0800'0000ULL - AllocPageSize, AllocPageSize * 2);
+    } else {
+      DoMMap(0x2'0000'0000ULL, 0x1000'0000);
+      DoMMap(0x3'0000'0000ULL, 0x1'0000'1000);
+    }
+#else
     if (LimitedSize) {
       DoMMap(0xe000'0000, AllocPageSize * 10);
 
@@ -484,6 +498,7 @@ public:
       // This is for large SIB 32bit displacement testing
       DoMMap(0x2'0000'0000, 0x1'0000'1000);
     }
+#endif
 
     // Map in the memory region for the test file
 #ifndef _WIN32
@@ -493,9 +508,20 @@ public:
     // Special magic DOS area that starts at 0x1'0000
     auto ASMPtr = DoMMap(1, 0x110000 - 1);
 #endif
+#ifdef __APPLE__
+    // On macOS, MAP_JIT + PROT_EXEC requires the system to choose the address.
+    // Update Code_start_page to the actual allocated address.
+    LOGMAN_THROW_A_FMT(ASMPtr != nullptr && ASMPtr != reinterpret_cast<void*>(-1ULL), "Couldn't allocate code page");
+    Code_start_page = reinterpret_cast<uint64_t>(ASMPtr);
+    // Enable JIT write access to copy test code to MAP_JIT memory
+    FEXCore::Allocator::SetJITWritable();
+    memcpy(ASMPtr, RawASMFile.data(), RawASMFile.size());
+    FEXCore::Allocator::SetJITExecutable();
+#else
     LOGMAN_THROW_A_FMT((uint64_t)ASMPtr == Code_start_page, "Couldn't allocate code at expected page: 0x{:x} != 0x{:x}", (uint64_t)ASMPtr,
                        Code_start_page);
     memcpy(ASMPtr, RawASMFile.data(), RawASMFile.size());
+#endif
     RIP = Code_start_page;
 
     // Map the memory regions the test file asks for
@@ -604,9 +630,16 @@ public:
   }
 
 private:
+#ifdef __APPLE__
+  // macOS PAGEZERO prevents mapping below 4GB, use higher addresses
+  // Stack and code at addresses above 8GB to avoid conflicts
+  constexpr static uint64_t STACK_OFFSET = 0x2'c000'0000ULL;
+  uint64_t Code_start_page = 0x2'0001'0000ULL;
+#else
   constexpr static uint64_t STACK_OFFSET = 0xc000'0000;
   // Zero is special case to know when we are done
   uint64_t Code_start_page = 0x1'0000;
+#endif
   uint64_t RIP {};
 
   fextl::vector<char> RawASMFile;

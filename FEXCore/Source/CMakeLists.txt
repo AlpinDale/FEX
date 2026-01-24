@@ -271,7 +271,8 @@ function(AddLibrary Name Type)
 
   # During generation of the import library (dll.a), MinGW needs some extra symbols from libraries
   # such as fmt, which are propagated by FEXCore_Base. Wonderful.
-  if (MINGW)
+  # macOS also needs transitive dependencies from FEXCore_Base for shared library linking.
+  if (MINGW OR _FEX_PLATFORM_MACOS)
     target_link_libraries(${Name} FEXCore_Base)
   endif()
   AddDefaultOptionsToTarget(${Name})

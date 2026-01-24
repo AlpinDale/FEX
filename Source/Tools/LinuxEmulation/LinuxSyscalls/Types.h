@@ -5,7 +5,39 @@
 
 #include <algorithm>
 #include <signal.h>
+#ifdef __APPLE__
+// macOS doesn't have epoll, provide minimal definitions for x86 emulation
+#ifndef FEX_EPOLL_DATA_DEFINED
+#define FEX_EPOLL_DATA_DEFINED
+typedef union epoll_data {
+  void* ptr;
+  int fd;
+  uint32_t u32;
+  uint64_t u64;
+} epoll_data_t;
+
+struct epoll_event {
+  uint32_t events;
+  epoll_data_t data;
+} __attribute__((packed));
+#endif
+
+#ifndef EPOLLIN
+#define EPOLLIN 0x001
+#define EPOLLOUT 0x004
+#define EPOLLERR 0x008
+#define EPOLLHUP 0x010
+#define EPOLLRDHUP 0x2000
+#define EPOLLONESHOT (1 << 30)
+#define EPOLLET (1 << 31)
+
+#define EPOLL_CTL_ADD 1
+#define EPOLL_CTL_DEL 2
+#define EPOLL_CTL_MOD 3
+#endif
+#else
 #include <sys/epoll.h>
+#endif
 #include <type_traits>
 
 namespace FEX::HLE {

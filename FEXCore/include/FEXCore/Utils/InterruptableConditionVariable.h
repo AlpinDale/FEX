@@ -5,13 +5,17 @@
 #include <chrono>
 #include <climits>
 #include <cstdint>
-#ifndef _WIN32
+#if defined(__linux__)
 #include <linux/futex.h>
 #include <sys/syscall.h>
-#else
+#elif defined(_WIN32)
 #include <errhandlingapi.h>
 #include <synchapi.h>
 #include <winerror.h>
+#elif defined(__APPLE__)
+// macOS: use os_unfair_lock for synchronization
+#include <os/lock.h>
+#include <errno.h>
 #endif
 #include <unistd.h>
 
@@ -24,7 +28,7 @@ namespace FEXCore {
  * call can leave the condition variable in an invalid state that breaks later
  * uses of that object and may cause hangs as a consequence.
  */
-#ifndef _WIN32
+#if defined(__linux__)
 class InterruptableConditionVariable final {
 public:
   bool Wait(struct timespec* Timeout = nullptr) {
@@ -90,7 +94,71 @@ private:
     }
   }
 };
-#else
+#elif defined(__APPLE__)
+// macOS implementation using spin-wait with atomic operations
+// macOS doesn't have Linux futex, so we use a simple spin-wait approach
+class InterruptableConditionVariable final {
+public:
+  bool Wait(struct timespec* Timeout = nullptr) {
+    auto TimeoutNS =
+      Timeout ? std::chrono::seconds(Timeout->tv_sec) + std::chrono::nanoseconds(Timeout->tv_nsec) : std::chrono::nanoseconds::max();
+    auto Start = std::chrono::steady_clock::now();
+
+    while (true) {
+      uint32_t Expected = SIGNALED;
+      uint32_t Desired = UNSIGNALED;
+
+      // If the mutex was already signaled then we can early exit
+      if (Mutex.compare_exchange_strong(Expected, Desired)) {
+        return true;
+      }
+
+      // Check timeout
+      if (Timeout) {
+        auto Now = std::chrono::steady_clock::now();
+        if ((Now - Start) >= TimeoutNS) {
+          return false;
+        }
+      }
+
+      // Spin-wait with a short sleep to avoid burning CPU
+      usleep(100);
+    }
+  }
+
+  template<class Rep, class Period>
+  bool WaitFor(const std::chrono::duration<Rep, Period>& time) {
+    struct timespec Timeout {};
+    auto SecondsDuration = std::chrono::duration_cast<std::chrono::seconds>(time);
+    Timeout.tv_sec = SecondsDuration.count();
+    Timeout.tv_nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(time - SecondsDuration).count();
+    return Wait(&Timeout);
+  }
+
+  void NotifyOne() {
+    DoNotify();
+  }
+
+  void NotifyAll() {
+    DoNotify();
+  }
+
+private:
+  std::atomic<uint32_t> Mutex {};
+  constexpr static uint32_t SIGNALED = 1;
+  constexpr static uint32_t UNSIGNALED = 0;
+
+  void DoNotify() {
+    uint32_t Expected = UNSIGNALED;
+    uint32_t Desired = SIGNALED;
+
+    // If the mutex was in an unsignaled state then signal
+    Mutex.compare_exchange_strong(Expected, Desired);
+    // Note: On macOS, we don't have a way to wake specific waiters like futex WAKE,
+    // but the spin-wait loop will eventually see the changed value.
+  }
+};
+#else // _WIN32
 class InterruptableConditionVariable final {
 public:
   bool Wait(struct timespec* Timeout = nullptr) {

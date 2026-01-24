@@ -4,6 +4,26 @@
 
 #include <thread>
 #include <vector>
+#include <unistd.h>
+
+#ifdef __APPLE__
+#include <fcntl.h>
+// pipe2 not available on macOS
+static inline int pipe2(int pipefd[2], int flags) {
+  int result = pipe(pipefd);
+  if (result == 0) {
+    if (flags & O_CLOEXEC) {
+      fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+      fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+    }
+    if (flags & O_NONBLOCK) {
+      fcntl(pipefd[0], F_SETFL, fcntl(pipefd[0], F_GETFL) | O_NONBLOCK);
+      fcntl(pipefd[1], F_SETFL, fcntl(pipefd[1], F_GETFL) | O_NONBLOCK);
+    }
+  }
+  return result;
+}
+#endif
 
 namespace Logging {
 void ClientMsgHandler(int FD, FEXServerClient::Logging::PacketMsg* const Msg, const char* MsgStr);

@@ -9,6 +9,7 @@ $end_info$
 #pragma once
 
 #include "LinuxSyscalls/Types.h"
+#include "LinuxSyscalls/HostABI.h"
 #include "ArchHelpers/MContext.h"
 #include "VDSO_Emulation.h"
 
@@ -182,17 +183,8 @@ private:
     DEFAULT_IGNORE,
   };
 
-  struct kernel_sigaction {
-    union {
-      void (*handler)(int);
-      void (*sigaction)(int, siginfo_t*, void*);
-    };
-
-    uint64_t sa_flags;
-
-    void (*restorer)();
-    uint64_t sa_mask;
-  };
+  // Use kernel_sigaction from HostABI.h (FEX::HLE::kernel_sigaction)
+  using kernel_sigaction = FEX::HLE::kernel_sigaction;
 
   struct SignalHandler {
     std::atomic<bool> Installed {};

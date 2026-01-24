@@ -14,6 +14,10 @@ $end_info$
 #include <sys/mount.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
+
 namespace FEX::HLE::x32 {
 void RegisterFS(FEX::HLE::SyscallHandler* Handler) {
   REGISTER_SYSCALL_IMPL_X32(umount, [](FEXCore::Core::CpuStateFrame* Frame, const char* target) -> uint64_t {

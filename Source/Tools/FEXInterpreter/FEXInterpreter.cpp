@@ -48,13 +48,15 @@ $end_info$
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 #include <fcntl.h>
 #include <mutex>
 #include <queue>
 #include <set>
+#ifndef __APPLE__
 #include <sys/auxv.h>
 #include <sys/prctl.h>
+#endif
 #include <sys/resource.h>
 #include <sys/select.h>
 #include <system_error>
@@ -62,7 +64,9 @@ $end_info$
 #include <unistd.h>
 #include <utility>
 
+#ifndef __APPLE__
 #include <sys/sysinfo.h>
+#endif
 #include <sys/signal.h>
 
 namespace FEX::Logging {

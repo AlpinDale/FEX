@@ -15,7 +15,11 @@ $end_info$
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#ifndef __APPLE__
 #include <sys/timex.h>
+#else
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
 #include <unistd.h>
 #include <utime.h>
 

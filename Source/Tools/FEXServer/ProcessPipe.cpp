@@ -29,6 +29,25 @@
 
 #include <xxhash.h>
 
+#ifdef __APPLE__
+#include <unistd.h>
+// pipe2 not available on macOS
+static inline int pipe2(int pipefd[2], int flags) {
+  int result = pipe(pipefd);
+  if (result == 0) {
+    if (flags & O_CLOEXEC) {
+      fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+      fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
+    }
+    if (flags & O_NONBLOCK) {
+      fcntl(pipefd[0], F_SETFL, fcntl(pipefd[0], F_GETFL) | O_NONBLOCK);
+      fcntl(pipefd[1], F_SETFL, fcntl(pipefd[1], F_GETFL) | O_NONBLOCK);
+    }
+  }
+  return result;
+}
+#endif
+
 namespace FEXCore {
 inline bool operator<(const FEXCore::ExecutableFileInfo& a, const FEXCore::ExecutableFileInfo& b) noexcept {
   return a.FileId < b.FileId;
@@ -69,10 +88,16 @@ void SetWatchFD(int FD) {
 }
 
 size_t GetNumFilesOpen() {
+#ifdef __APPLE__
+  // macOS doesn't have /proc/self/fd, use a reasonable default
+  // This is used for FD limit management, not critical functionality
+  return 64;
+#else
   // Walk /proc/self/fd/ to see how many open files we currently have
   const std::filesystem::path self {"/proc/self/fd/"};
 
   return std::distance(std::filesystem::directory_iterator {self}, std::filesystem::directory_iterator {});
+#endif
 }
 
 void GetMaxFDs() {
@@ -296,7 +321,7 @@ void SendFDSuccessPacket(fasio::tcp_socket& Socket, int FD) {
 }
 
 // Discovers any pending code maps, parses their contents into a runtime data structure, and deletes them
-static std::map<FEXCore::ExecutableFileInfo, fextl::set<uintptr_t>>
+static std::map<FEXCore::ExecutableFileInfo, fextl::set<uint64_t>>
 ImportPendingCodeMaps(const FEXCore::ExecutableFileInfo& MainFileId, bool HasMultiblock) {
   // Detect code maps by checking file name suffixes by counting up an index.
   // Code maps that are ready for reading must be non-empty and flock(FLOCK_EX) must succeed:
@@ -328,7 +353,7 @@ ImportPendingCodeMaps(const FEXCore::ExecutableFileInfo& MainFileId, bool HasMul
   }
 
   // Update merged code map
-  std::map<FEXCore::ExecutableFileInfo, fextl::set<uintptr_t>> ImportedCodeMaps;
+  std::map<FEXCore::ExecutableFileInfo, fextl::set<uint64_t>> ImportedCodeMaps;
   if (!CodeMaps.empty()) {
     fmt::print("Found {} new code maps, updating reference code map\n", CodeMaps.size());
 
@@ -354,7 +379,7 @@ ImportPendingCodeMaps(const FEXCore::ExecutableFileInfo& MainFileId, bool HasMul
 /**
  * Writes aggregated code map data into a single code map file that is ready to be used for cache generation
  */
-static void WriteNewCodeMap(const FEXCore::ExecutableFileInfo& File, const std::string& OutputName, const fextl::set<uintptr_t>& Blocks,
+static void WriteNewCodeMap(const FEXCore::ExecutableFileInfo& File, const std::string& OutputName, const fextl::set<uint64_t>& Blocks,
                             bool IsMainFile, const auto& Dependencies) {
   fmt::print("Writing {} blocks to {}\n", Blocks.size(), OutputName);
 
@@ -431,7 +456,14 @@ static std::map<FEXCore::ExecutableFileInfo, NeedsCacheRefresh> AggregateCodeMap
     if (auto ReferenceCodeMap = std::ifstream(OutputName, std::ios_base::binary)) {
       auto PreviousBlocks = FEXCore::CodeMap::ParseCodeMap(ReferenceCodeMap).at(File.FileId).Blocks;
       auto NumPreviousBlocks = PreviousBlocks.size();
+#ifdef __APPLE__
+      // merge() may not work correctly with custom allocators on macOS
+      for (auto&& block : PreviousBlocks) {
+        Blocks.insert(block);
+      }
+#else
       Blocks.merge(std::move(PreviousBlocks));
+#endif
       if (Blocks.size() == NumPreviousBlocks) {
         // No new blocks => no need to regenerate the corresponding cache
         continue;

@@ -6,7 +6,11 @@ $end_info$
 */
 
 #ifndef _WIN32
+#ifdef __APPLE__
+#include <sys/syscall.h>
+#else
 #include <syscall.h>
+#endif
 #endif
 
 #include "Interface/Context/Context.h"
@@ -243,6 +247,10 @@ DEF_OP(ProcessorID) {
   // Load the getcpu syscall number
 #if defined(ARCHITECTURE_x86_64)
   // Just to ensure the syscall number doesn't change if compiled for an x86_64 host.
+  constexpr auto GetCPUSyscallNum = 0xa8;
+#elif defined(__APPLE__)
+  // macOS doesn't have getcpu syscall - use Linux aarch64 syscall number
+  // This code path is only used on Linux anyway (guarded by _WIN32 above)
   constexpr auto GetCPUSyscallNum = 0xa8;
 #else
   constexpr auto GetCPUSyscallNum = SYS_getcpu;

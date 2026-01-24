@@ -17,10 +17,19 @@
 
 #include <array>
 #include <dlfcn.h>
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 #include <fcntl.h>
 #include <filesystem>
+#ifndef __APPLE__
 #include <sys/auxv.h>
+#else
+#include "LinuxSyscalls/LinuxCompat.h"
+// getauxval doesn't exist on macOS, provide stub
+static inline unsigned long getauxval(unsigned long type) {
+  (void)type;
+  return 0; // Not supported on macOS
+}
+#endif
 #include <sys/mman.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -759,7 +768,8 @@ void LoadFEXGeneratedCode(FEXCore::Core::InternalThreadState* Thread, bool Is64B
 
   if (!VDSOPointers.VDSO_FEX_CallbackRET) {
     constexpr std::array<uint8_t, 2> CallbackRetCode = {
-      0x0F, 0x3E, // CALLBACKRET FEX Instruction
+      0x0F,
+      0x3E, // CALLBACKRET FEX Instruction
     };
 
     VDSOPointers.VDSO_FEX_CallbackRET = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(Mapping->X86GeneratedCodePtr) + CurrentCodeOffset);

@@ -2,7 +2,9 @@
 #include "LinuxSyscalls/Syscalls.h"
 
 namespace FEX::HLE::FaultSafeUserMemAccess {
-#ifdef ARCHITECTURE_arm64
+// The fault-safe memory operations are Linux-specific using signal handling for faults.
+// On macOS, we fall back to regular memcpy since the fault handling mechanism is different.
+#if defined(ARCHITECTURE_arm64) && !defined(__APPLE__)
 __attribute__((naked)) size_t CopyFromUser(void* Dest, const void* Src, size_t Size) {
   __asm volatile(R"(
   // Early exit if a memcpy of size zero.
@@ -178,6 +180,43 @@ size_t CopyToUser(void* Dest, const void* Src, size_t Size) {
 
 bool IsFaultLocation(uint64_t PC) {
   return false;
+}
+
+// Stub implementations for non-Linux platforms (e.g., macOS)
+// These don't do actual fault-safe checking but allow the code to compile
+void VerifyIsReadable(const void* Src, size_t Size) {
+  // No-op on macOS; assume memory is readable
+  (void)Src;
+  (void)Size;
+}
+
+void VerifyIsStringReadable(const char* Src) {
+  // No-op on macOS
+  (void)Src;
+}
+
+void VerifyIsStringReadableMaxSize(const char* Src, size_t MaxSize) {
+  // No-op on macOS
+  (void)Src;
+  (void)MaxSize;
+}
+
+void VerifyIsReadableOrNull(const void* Src, size_t Size) {
+  // No-op on macOS
+  (void)Src;
+  (void)Size;
+}
+
+void VerifyIsWritable(void* Src, size_t Size) {
+  // No-op on macOS
+  (void)Src;
+  (void)Size;
+}
+
+void VerifyIsWritableOrNull(void* Src, size_t Size) {
+  // No-op on macOS
+  (void)Src;
+  (void)Size;
 }
 #endif
 } // namespace FEX::HLE::FaultSafeUserMemAccess

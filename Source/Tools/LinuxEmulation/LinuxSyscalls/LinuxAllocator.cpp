@@ -9,11 +9,17 @@
 #include <FEXCore/fextl/memory.h>
 
 #include <bitset>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <linux/mman.h>
-#include <unistd.h>
-#include <sys/user.h>
-#include <sys/mman.h>
 #include <sys/shm.h>
+#endif
+#include <unistd.h>
+#ifndef __APPLE__
+#include <sys/user.h>
+#endif
+#include <sys/mman.h>
 
 #ifndef MREMAP_DONTUNMAP
 #define MREMAP_DONTUNMAP 4
@@ -416,7 +422,7 @@ uint64_t MemAllocator32Bit::Shmat(int shmid, const void* shmaddr, int shmflg, ui
         return -ENOMEM;
       }
 
-      uintptr_t NewAddr = reinterpret_cast<uintptr_t>(Result);
+      uintptr_t NewAddr = static_cast<uintptr_t>(Result);
       uintptr_t NewPageAddr = NewAddr >> FEXCore::Utils::FEX_PAGE_SHIFT;
 
       // Add to the map

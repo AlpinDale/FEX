@@ -13,6 +13,7 @@
 #include <FEXCore/Core/X86Enums.h>
 #include <FEXCore/Debug/InternalThreadState.h>
 #include <FEXCore/HLE/SyscallHandler.h>
+#include <FEXCore/Utils/AllocatorHooks.h>
 #include <FEXCore/Utils/Event.h>
 #include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/MathUtils.h>
@@ -40,7 +41,10 @@ constexpr size_t MAX_DISPATCHER_CODE_SIZE = FEXCore::Utils::FEX_PAGE_SIZE * 4;
 Dispatcher::Dispatcher(FEXCore::Context::ContextImpl* ctx)
   : Arm64Emitter(ctx, FEXCore::Allocator::VirtualAlloc(MAX_DISPATCHER_CODE_SIZE, true), MAX_DISPATCHER_CODE_SIZE)
   , CTX {ctx} {
+  // Enable JIT write access for code emission, then re-enable protection
+  FEXCore::Allocator::SetJITWritable();
   EmitDispatcher();
+  FEXCore::Allocator::SetJITExecutable();
 
   FEXCore::Allocator::VirtualName("FEXMem_Misc", reinterpret_cast<void*>(GetBufferBase()), MAX_DISPATCHER_CODE_SIZE);
 }

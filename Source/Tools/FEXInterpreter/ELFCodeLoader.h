@@ -24,15 +24,116 @@
 #include <FEXHeaderUtils/Syscalls.h>
 #include <FEXHeaderUtils/SymlinkChecks.h>
 
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 #include <fcntl.h>
 #include <fmt/format.h>
+#ifdef __APPLE__
+
+#ifndef AT_NULL
+#define AT_NULL 0
+#define AT_PHDR 3
+#define AT_PHENT 4
+#define AT_PHNUM 5
+#define AT_PAGESZ 6
+#define AT_BASE 7
+#define AT_FLAGS 8
+#define AT_ENTRY 9
+#define AT_UID 11
+#define AT_EUID 12
+#define AT_GID 13
+#define AT_EGID 14
+#define AT_PLATFORM 15
+#define AT_HWCAP 16
+#define AT_CLKTCK 17
+#define AT_SECURE 23
+#define AT_RANDOM 25
+#define AT_HWCAP2 26
+#define AT_EXECFN 31
+#define AT_SYSINFO_EHDR 33
+#define AT_MINSIGSTKSZ 51
+#endif
+static inline unsigned long fex_getauxval(unsigned long type) {
+  (void)type;
+  return 0;
+}
+#define getauxval fex_getauxval
+
+// personality definitions
+#ifndef PER_LINUX
+#define PER_LINUX 0x0000
+#define PER_LINUX32 0x0008
+#define ADDR_LIMIT_32BIT 0x0800000
+#define ADDR_NO_RANDOMIZE 0x0040000
+#endif
+static inline int fex_personality(unsigned long persona) {
+  (void)persona;
+  return PER_LINUX;
+}
+#define personality fex_personality
+
+// prctl definitions
+#ifndef PR_SET_NAME
+#define PR_SET_NAME 15
+#define PR_SET_NO_NEW_PRIVS 38
+#define PR_GET_SPECULATION_CTRL 52
+#define PR_SET_SPECULATION_CTRL 53
+#define PR_SET_MM 35
+#define PR_SET_MM_MAP 14
+#define PR_SPEC_STORE_BYPASS 0
+#define PR_SPEC_INDIRECT_BRANCH 1
+#define PR_SPEC_L1D_FLUSH 2
+#define PR_SPEC_NOT_AFFECTED 0
+#define PR_SPEC_PRCTL (1UL << 0)
+#define PR_SPEC_ENABLE (1UL << 1)
+#define PR_SPEC_DISABLE (1UL << 2)
+#define PR_SPEC_FORCE_DISABLE (1UL << 3)
+#define PR_SPEC_DISABLE_NOEXEC (1UL << 4)
+#endif
+
+// prctl_mm_map structure from linux/prctl.h
+struct prctl_mm_map {
+  uint64_t start_code;
+  uint64_t end_code;
+  uint64_t start_data;
+  uint64_t end_data;
+  uint64_t start_brk;
+  uint64_t brk;
+  uint64_t start_stack;
+  uint64_t arg_start;
+  uint64_t arg_end;
+  uint64_t env_start;
+  uint64_t env_end;
+  uint64_t* auxv;
+  uint32_t auxv_size;
+  uint32_t exe_fd;
+};
+
+// Variadic prctl stub to handle different argument types
+static inline int fex_prctl(int option, ...) {
+  (void)option;
+  return -1;
+}
+#define prctl fex_prctl
+
+// getrandom stub
+#include <Security/Security.h>
+static inline ssize_t fex_getrandom(void* buf, size_t buflen, unsigned int flags) {
+  (void)flags;
+  if (SecRandomCopyBytes(kSecRandomDefault, buflen, buf) == errSecSuccess) {
+    return static_cast<ssize_t>(buflen);
+  }
+  return -1;
+}
+#define getrandom fex_getrandom
+#else
 #include <sys/auxv.h>
-#include <sys/mman.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
 #include <sys/random.h>
 #include <linux/prctl.h>
+#endif
+#include <sys/mman.h>
+#include <algorithm>
 
 #define PAGE_START(x) ((x) & ~(uintptr_t)(4095))
 #define PAGE_OFFSET(x) ((x) & 4095)
@@ -66,8 +167,8 @@ class ELFCodeLoader final : public FEX::CodeLoader {
       }
 
       had_pt_load = true;
-      min_map_address = std::min(min_map_address, PAGE_START(it.p_vaddr));
-      max_map_address = std::max(max_map_address, it.p_vaddr + it.p_memsz);
+      min_map_address = std::min(min_map_address, static_cast<size_t>(PAGE_START(it.p_vaddr)));
+      max_map_address = std::max(max_map_address, static_cast<size_t>(it.p_vaddr + it.p_memsz));
     }
 
     if (!had_pt_load) {
@@ -143,6 +244,16 @@ class ELFCodeLoader final : public FEX::CodeLoader {
       if (FEX::HLE::HasSyscallError(LoadBase)) {
         return {};
       }
+
+#ifdef __APPLE__
+      // On macOS, we cannot use MAP_FIXED to replace portions of an existing mapping,
+      // and we cannot munmap portions of a mapping either. The workaround is:
+      // 1. Allocate a region to find a suitable address (done above)
+      // 2. Immediately unmap the entire region
+      // 3. Map individual segments with MAP_FIXED to the now-free addresses
+      // This works because MAP_FIXED on an unmapped address succeeds on macOS.
+      Handler->GuestMunmap(Thread, reinterpret_cast<void*>(LoadBase), TotalSize);
+#endif
 
       // fprintf(stderr, "elf %d: %lx-%lx\n", Elf.fd, LoadBase, LoadBase + TotalSize);
       if (BrkBase) {
@@ -467,6 +578,12 @@ public:
       return false;
     }
 
+#ifdef __APPLE__
+    // On macOS, we cannot use MAP_FIXED to replace portions of an existing mapping.
+    // Unmap the entire stack region first, then remap just the usable portion.
+    Handler->GuestMunmap(Thread, StackPointerBase, FULL_STACK_SIZE);
+#endif
+
     // Allocate with permissions the 8MB of regular stack size.
     StackPointer = reinterpret_cast<uintptr_t>(Handler->GuestMmap(
       Thread, reinterpret_cast<void*>(reinterpret_cast<uint64_t>(StackPointerBase) + FULL_STACK_SIZE - StackSize()), StackSize(),
@@ -637,8 +754,9 @@ public:
         auto VSyscallPage =
           Handler->GuestMmap(Thread, nullptr, FEXCore::Utils::FEX_PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         constexpr static uint8_t VSyscallCode[] = {
-          0xcd, 0x80, // int 0x80
-          0xc3,       // ret
+          0xcd,
+          0x80, // int 0x80
+          0xc3, // ret
         };
         memcpy(VSyscallPage, VSyscallCode, sizeof(VSyscallCode));
         mprotect(VSyscallPage, FEXCore::Utils::FEX_PAGE_SIZE, PROT_READ);

@@ -10,7 +10,7 @@
 
 #include <cstdint>
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 #include <linux/prctl.h>
 #include <sys/prctl.h>
 #endif
@@ -353,12 +353,15 @@ namespace CPU {
     Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Size, true));
     LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");
 
+#ifndef __APPLE__
     // Protect the last page of the allocated buffer to trigger SIGSEGV on write access
+    // Skip on macOS because MAP_JIT memory cannot have its protection changed with mprotect
     uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, FEXCore::Utils::FEX_PAGE_SIZE);
     if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_PAGE_SIZE,
                                             FEXCore::Allocator::ProtectOptions::None)) {
       LogMan::Msg::EFmt("Failed to mprotect last page of code buffer.");
     }
+#endif
 
     FEXCore::Allocator::VirtualName("FEXMemJIT", reinterpret_cast<void*>(Ptr), Size);
 
@@ -370,7 +373,7 @@ namespace CPU {
   }
 
   auto CodeBufferManager::AllocateNew(size_t Size) -> fextl::shared_ptr<CodeBuffer> {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 // MDWE (Memory-Deny-Write-Execute) is a new Linux 6.3 feature.
 // It's equivalent to systemd's `MemoryDenyWriteExecute` but implemented entirely in the kernel.
 //

@@ -6,7 +6,16 @@
 
 #ifndef _WIN32
 #include <stdlib.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#include <pthread.h>
+// macOS uses MAP_ANON instead of MAP_ANONYMOUS
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+#else
 #include <malloc.h>
+#endif
 #include <sys/mman.h>
 #else
 #define NTDDI_VERSION 0x0A000005
@@ -19,6 +28,35 @@
 #include <sys/types.h>
 
 namespace FEXCore::Allocator {
+
+// JIT write protection helpers for macOS W^X enforcement
+// On macOS with MAP_JIT memory, we must toggle between write and execute modes
+// using pthread_jit_write_protect_np(). These helpers provide a cross-platform interface.
+#ifdef __APPLE__
+inline void SetJITWritable() {
+  pthread_jit_write_protect_np(false);
+}
+inline void SetJITExecutable() {
+  pthread_jit_write_protect_np(true);
+}
+#else
+inline void SetJITWritable() {}
+inline void SetJITExecutable() {}
+#endif
+
+// RAII helper for scoped JIT write access
+class ScopedJITWrite {
+public:
+  ScopedJITWrite() {
+    SetJITWritable();
+  }
+  ~ScopedJITWrite() {
+    SetJITExecutable();
+  }
+  ScopedJITWrite(const ScopedJITWrite&) = delete;
+  ScopedJITWrite& operator=(const ScopedJITWrite&) = delete;
+};
+
 enum class ProtectOptions : uint32_t {
   None = 0,
   Read = (1U << 0),
@@ -95,11 +133,29 @@ FEX_DEFAULT_VISIBILITY extern void VirtualName(const char* Name, void* Ptr, size
 // All commit parameters are ignored here, they are unnecessary as Linux supports overcommit
 
 inline void* VirtualAlloc(size_t Size, bool Execute = false, bool Commit = true) {
+#ifdef __APPLE__
+  // macOS requires MAP_JIT flag for writable+executable memory
+  int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+  if (Execute) {
+    flags |= MAP_JIT;
+  }
+  return FEXCore::Allocator::mmap(nullptr, Size, PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0), flags, -1, 0);
+#else
   return FEXCore::Allocator::mmap(nullptr, Size, PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
 }
 
 inline void* VirtualAlloc(void* Base, size_t Size, bool Execute = false, bool Commit = true) {
+#ifdef __APPLE__
+  // macOS requires MAP_JIT flag for writable+executable memory
+  int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+  if (Execute) {
+    flags |= MAP_JIT;
+  }
+  return FEXCore::Allocator::mmap(Base, Size, PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0), flags, -1, 0);
+#else
   return FEXCore::Allocator::mmap(Base, Size, PROT_READ | PROT_WRITE | (Execute ? PROT_EXEC : 0), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
 }
 
 inline void VirtualFree(void* Ptr, size_t Size) {

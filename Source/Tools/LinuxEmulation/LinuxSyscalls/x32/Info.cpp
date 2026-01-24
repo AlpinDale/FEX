@@ -10,12 +10,16 @@ $end_info$
 #include "LinuxSyscalls/x32/Types.h"
 
 #include <algorithm>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <asm/posix_types.h>
-#include <limits>
 #include <linux/utsname.h>
+#include <sys/sysinfo.h>
+#endif
+#include <limits>
 #include <stdint.h>
 #include <sys/resource.h>
-#include <sys/sysinfo.h>
 #include <sys/utsname.h>
 
 #include <git_version.h>

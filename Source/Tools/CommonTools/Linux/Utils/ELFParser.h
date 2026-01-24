@@ -4,7 +4,7 @@
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/vector.h>
 
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 #include <fcntl.h>
 #include <unistd.h>
 

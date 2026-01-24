@@ -14,7 +14,22 @@ $end_info$
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/mount.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+static inline int swapon(const char* path, int swapflags) {
+  (void)path;
+  (void)swapflags;
+  errno = ENOSYS;
+  return -1;
+}
+static inline int swapoff(const char* path) {
+  (void)path;
+  errno = ENOSYS;
+  return -1;
+}
+#else
 #include <sys/swap.h>
+#endif
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>

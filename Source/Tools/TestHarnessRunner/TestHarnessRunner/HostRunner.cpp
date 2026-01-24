@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: MIT
+// This file contains x86_64 Linux-specific host runner code for testing.
+// It is not applicable on macOS (which runs on ARM64 and doesn't have the
+// same ucontext/mcontext structures for x86_64 emulation).
+#ifndef __APPLE__
+
 #include "ArchHelpers/UContext.h"
 #include "LinuxSyscalls/SignalDelegator.h"
 #include <FEXCore/Config/Config.h>
@@ -310,3 +315,18 @@ void RunAsHost(fextl::unique_ptr<FEX::HLE::SignalDelegator>& SignalDelegation, u
   LOGMAN_MSG_A_FMT("RunAsHost doesn't exist for this host");
 }
 #endif
+
+#else // __APPLE__
+// macOS stub, host running is not supported
+#include <FEXCore/fextl/memory.h>
+#include <FEXCore/Utils/LogManager.h>
+namespace FEX::HLE {
+class SignalDelegator;
+}
+namespace FEXCore::Core {
+struct CPUState;
+}
+void RunAsHost(fextl::unique_ptr<FEX::HLE::SignalDelegator>& SignalDelegation, uintptr_t InitialRip, FEXCore::Core::CPUState* OutputState) {
+  LOGMAN_MSG_A_FMT("RunAsHost doesn't exist for macOS");
+}
+#endif // __APPLE__

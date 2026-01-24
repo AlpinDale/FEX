@@ -10,6 +10,10 @@
 #include <range/v3/view/split.hpp>
 #include <range/v3/view/transform.hpp>
 
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
+
 #ifdef ARCHITECTURE_x86_64
 #include "Common/X86Features.h"
 #endif
@@ -54,7 +58,8 @@ static int ReadSVEVectorLengthInBits() {
 }
 #endif
 
-#ifdef ARCHITECTURE_arm64
+#if defined(ARCHITECTURE_arm64) && !defined(__APPLE__)
+// Linux ARM64: Read system registers directly (kernel traps and emulates these)
 #define GetSysReg(name, reg)                         \
   static uint64_t Get_##name() {                     \
     uint64_t Result {};                              \
@@ -102,6 +107,169 @@ public:
 
 FEX::CPUFeatures GetCPUFeaturesFromIDRegisters() {
   return CPUFeaturesFromID {};
+}
+
+#elif defined(ARCHITECTURE_arm64) && defined(__APPLE__)
+// macOS ARM64: Cannot read EL1 system registers from userspace.
+// Use sysctl to query CPU features and construct appropriate register values.
+#include <sys/sysctl.h>
+
+static bool SysctlHasFeature(const char* name) {
+  int value = 0;
+  size_t size = sizeof(value);
+  if (sysctlbyname(name, &value, &size, nullptr, 0) == 0) {
+    return value != 0;
+  }
+  return false;
+}
+
+class CPUFeaturesFromMacOS final : public FEX::CPUFeatures {
+public:
+  CPUFeaturesFromMacOS() {
+    // macOS doesn't expose raw register values, so we construct synthetic values
+    // based on sysctl feature flags.
+
+    // Query macOS for available ARM features via sysctl
+    // Apple Silicon supports many ARMv8.x features
+
+    // ISAR0: Atomic, SHA, AES, CRC32, etc.
+    uint64_t isar0_val = 0;
+    if (SysctlHasFeature("hw.optional.armv8_crc32")) {
+      isar0_val |= (1ULL << 16); // CRC32
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_LSE")) {
+      isar0_val |= (2ULL << 20); // LSE (Atomics)
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_RDM")) {
+      isar0_val |= (1ULL << 28); // RDM
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_SHA1")) {
+      isar0_val |= (1ULL << 8); // SHA1
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_SHA256")) {
+      isar0_val |= (1ULL << 12); // SHA256
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_AES")) {
+      isar0_val |= (2ULL << 4); // AES + PMULL
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_SHA512")) {
+      isar0_val |= (2ULL << 12); // SHA512
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_SHA3")) {
+      isar0_val |= (1ULL << 32); // SHA3
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_DotProd")) {
+      isar0_val |= (1ULL << 44); // DotProd
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_FlagM")) {
+      isar0_val |= (1ULL << 52); // FlagM
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_FlagM2")) {
+      isar0_val |= (2ULL << 52); // FlagM2
+    }
+    ISAR0.SetReg(isar0_val);
+
+    // PFR0: FP, ASIMD, SVE, etc.
+    uint64_t pfr0_val = 0;
+    // Apple Silicon always supports FP and ASIMD
+    pfr0_val |= (0ULL << 16); // FP supported (0 = supported)
+    pfr0_val |= (0ULL << 20); // AdvSIMD supported (0 = supported)
+    if (SysctlHasFeature("hw.optional.arm.FEAT_FP16")) {
+      pfr0_val |= (1ULL << 16); // FP16
+      pfr0_val |= (1ULL << 20); // ASIMD FP16
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_DIT")) {
+      pfr0_val |= (1ULL << 48); // DIT
+    }
+    PFR0.SetReg(pfr0_val);
+
+    // PFR1: BTI, SSBS, etc.
+    uint64_t pfr1_val = 0;
+    if (SysctlHasFeature("hw.optional.arm.FEAT_BTI")) {
+      pfr1_val |= (1ULL << 0); // BTI
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_SSBS")) {
+      pfr1_val |= (1ULL << 4); // SSBS
+    }
+    PFR1.SetReg(pfr1_val);
+
+    // ISAR1: LRCPC, FCMA, JSCVT, DPB, etc.
+    uint64_t isar1_val = 0;
+    if (SysctlHasFeature("hw.optional.arm.FEAT_DPB")) {
+      isar1_val |= (1ULL << 0); // DPB
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_DPB2")) {
+      isar1_val |= (2ULL << 0); // DPB2
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_JSCVT")) {
+      isar1_val |= (1ULL << 12); // JSCVT
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_FCMA")) {
+      isar1_val |= (1ULL << 16); // FCMA
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_LRCPC")) {
+      isar1_val |= (1ULL << 20); // LRCPC
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_LRCPC2")) {
+      isar1_val |= (2ULL << 20); // LRCPC2
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_FRINTTS")) {
+      isar1_val |= (1ULL << 32); // FRINTTS
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_SB")) {
+      isar1_val |= (1ULL << 36); // SB
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_BF16")) {
+      isar1_val |= (1ULL << 44); // BF16
+    }
+    if (SysctlHasFeature("hw.optional.arm.FEAT_I8MM")) {
+      isar1_val |= (1ULL << 52); // I8MM
+    }
+    ISAR1.SetReg(isar1_val);
+
+    // MMFR0
+    uint64_t mmfr0_val = 0;
+    if (SysctlHasFeature("hw.optional.arm.FEAT_ECV")) {
+      mmfr0_val |= (1ULL << 60); // ECV
+    }
+    MMFR0.SetReg(mmfr0_val);
+
+    // MMFR2
+    uint64_t mmfr2_val = 0;
+    if (SysctlHasFeature("hw.optional.arm.FEAT_LSE2")) {
+      mmfr2_val |= (1ULL << 32); // LSE2
+    }
+    MMFR2.SetReg(mmfr2_val);
+
+    // MMFR1
+    uint64_t mmfr1_val = 0;
+    if (SysctlHasFeature("hw.optional.arm.FEAT_AFP")) {
+      mmfr1_val |= (1ULL << 44); // AFP
+    }
+    MMFR1.SetReg(mmfr1_val);
+
+    // ISAR2
+    uint64_t isar2_val = 0;
+    if (SysctlHasFeature("hw.optional.arm.FEAT_WFxT")) {
+      isar2_val |= (2ULL << 0); // WFxT
+    }
+    ISAR2.SetReg(isar2_val);
+
+    // MIDR: Use a generic value for Apple Silicon
+    // Format: Implementer[31:24] | Variant[23:20] | Arch[19:16] | PartNum[15:4] | Revision[3:0]
+    // Implementer 0x61 = Apple, Arch 0xF = ARMv8-A
+    MIDR.SetReg(0x610F0000);
+
+    // DCZID: Indicate DC ZVA not supported (bit 4 = 1 means prohibited)
+    // Apple Silicon doesn't allow DC ZVA from userspace
+    DCZID.SetReg(0b10000);
+
+    FillFeatureFlags();
+  }
+};
+
+FEX::CPUFeatures GetCPUFeaturesFromIDRegisters() {
+  return CPUFeaturesFromMacOS {};
 }
 #endif
 
@@ -739,11 +907,34 @@ FEXCore::HostFeatures FetchHostFeatures() {
 
   uint64_t CTR = 0;
   uint64_t MIDR = 0;
-#ifdef ARCHITECTURE_arm64
+#if defined(ARCHITECTURE_arm64) && !defined(__APPLE__)
   // We need to get the CPU's cache line size
   // We expect sane targets that have correct cacheline sizes across clusters
   __asm volatile("mrs %[ctr], ctr_el0" : [ctr] "=r"(CTR));
   __asm volatile("mrs %[midr], midr_el1" : [midr] "=r"(MIDR));
+#elif defined(ARCHITECTURE_arm64) && defined(__APPLE__)
+  // macOS doesn't allow reading CTR_EL0 or MIDR_EL1 from userspace
+  // Use sysctl to get cache line size
+  {
+    size_t cachelinesize = 0;
+    size_t size = sizeof(cachelinesize);
+    if (sysctlbyname("hw.cachelinesize", &cachelinesize, &size, nullptr, 0) == 0) {
+      // Construct synthetic CTR value
+      // CTR_EL0 format: DminLine[19:16] = log2(min DCache line size / 4)
+      //                 IminLine[3:0] = log2(min ICache line size / 4)
+      // For 64-byte cache line: log2(64/4) = log2(16) = 4
+      uint32_t log2_line = 0;
+      for (size_t v = cachelinesize / 4; v > 1; v >>= 1) {
+        log2_line++;
+      }
+      CTR = (log2_line << 16) | log2_line;
+    } else {
+      // Default to 64-byte cache lines (common on Apple Silicon)
+      CTR = (4ULL << 16) | 4ULL;
+    }
+  }
+  // Use synthetic MIDR for Apple Silicon
+  MIDR = 0x610F0000;
 #endif
 
   FEXCore::HostFeatures HostFeatures = {};

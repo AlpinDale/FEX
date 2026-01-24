@@ -8,7 +8,7 @@
 #include <FEXCore/fextl/memory.h>
 #include <FEXCore/Utils/SignalScopeGuards.h>
 
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 
 namespace FEX::HLE::VMATracking {
 ///// VMA (Virtual Memory Area) tracking /////

@@ -8,6 +8,9 @@ $end_info$
 */
 
 #include "LinuxSyscalls/Syscalls.h"
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
 #include <sys/shm.h>
 
 namespace FEX::HLE::VMATracking {

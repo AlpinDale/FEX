@@ -5,6 +5,7 @@
 #include "Utils/SpinWaitLock.h"
 
 #include <FEXCore/Debug/InternalThreadState.h>
+#include <FEXCore/Utils/AllocatorHooks.h>
 #include <FEXCore/Utils/EnumUtils.h>
 #include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/Telemetry.h>
@@ -1932,6 +1933,13 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
   if constexpr (!is_arm64) {
     return std::nullopt;
   }
+
+#ifdef __APPLE__
+  // On macOS with MAP_JIT, we need to enable write access to JIT memory
+  // before we can modify the spinlock or backpatch code. Use RAII to
+  // ensure we restore execute permissions when we're done.
+  FEXCore::Allocator::ScopedJITWrite jit_write_guard;
+#endif
 
   uint32_t* PC = (uint32_t*)ProgramCounter;
   uint32_t Instr = PC[0];

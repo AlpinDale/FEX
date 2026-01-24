@@ -22,7 +22,9 @@
 #include <fcntl.h>
 #ifndef _WIN32
 #include <sys/mman.h>
+#ifndef __APPLE__
 #include <sys/user.h>
+#endif
 #endif
 
 namespace fextl::pmr {
@@ -59,7 +61,14 @@ void* FEX_mmap(void* addr, size_t length, int prot, int flags, int fd, off_t off
 }
 
 void VirtualName(const char* Name, void* Ptr, size_t Size) {
+#ifndef __APPLE__
   prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, Ptr, Size, Name);
+#else
+  // macOS doesn't have PR_SET_VMA, this is a no-op
+  (void)Name;
+  (void)Ptr;
+  (void)Size;
+#endif
 }
 
 int FEX_munmap(void* addr, size_t length) {
@@ -82,17 +91,27 @@ static void AssignHookOverrides() {
 }
 
 void SetupHooks() {
+#ifdef __APPLE__
+  // macOS doesn't support the custom allocator which relies on /proc/self/maps
+  // and MAP_FIXED_NOREPLACE. Use the default system mmap/munmap instead.
+  // The mmap/munmap function pointers are already initialized to ::mmap/::munmap.
+#else
   Alloc64 = Alloc::OSAllocator::Create64BitAllocator();
   AssignHookOverrides();
+#endif
 }
 
 void ClearHooks() {
+#ifdef __APPLE__
+  // No custom allocator was set up on macOS, nothing to clear
+#else
   SetJemallocMmapHook(::mmap);
   SetJemallocMunmapHook(::munmap);
   FEXCore::Allocator::mmap = ::mmap;
   FEXCore::Allocator::munmap = ::munmap;
 
   Alloc::OSAllocator::ReleaseAllocatorWorkaround(std::move(Alloc64));
+#endif
 }
 #pragma GCC diagnostic pop
 
@@ -101,6 +120,13 @@ FEX_DEFAULT_VISIBILITY size_t DetermineVASize() {
     return HostVASize;
   }
 
+#ifdef __APPLE__
+  // macOS on Apple Silicon uses 36-bit or 39-bit VA space for userspace
+  // depending on the system configuration. We'll use 39-bit as a safe default.
+  // Apple Silicon M1/M2/M3 all support at least 39-bit VA.
+  HostVASize = 39;
+  return HostVASize;
+#else
   static constexpr std::array<uintptr_t, 7> TLBSizes = {
     57, 52, 48, 47, 42, 39, 36,
   };
@@ -133,6 +159,7 @@ FEX_DEFAULT_VISIBILITY size_t DetermineVASize() {
 
   LOGMAN_MSG_A_FMT("Couldn't determine host VA size");
   FEX_UNREACHABLE;
+#endif
 }
 
 #define STEAL_LOG(...) // fprintf(stderr, __VA_ARGS__)

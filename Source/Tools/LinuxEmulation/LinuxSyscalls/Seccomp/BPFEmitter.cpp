@@ -10,9 +10,13 @@ $end_info$
 #include <FEXCore/Utils/AllocatorHooks.h>
 #include <FEXCore/Utils/LogManager.h>
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#else
 #include <linux/bpf_common.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#endif
 
 namespace FEX::HLE {
 

@@ -20,13 +20,18 @@ $end_info$
 
 #include <errno.h>
 #include <grp.h>
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#include <sys/syscall.h>
+#else
 #include <linux/futex.h>
+#include <sys/fsuid.h>
+#include <syscall.h>
+#endif
 #include <sched.h>
 #include <signal.h>
-#include <sys/fsuid.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
-#include <syscall.h>
 #include <time.h>
 #include <unistd.h>
 

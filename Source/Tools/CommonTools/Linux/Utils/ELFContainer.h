@@ -7,7 +7,7 @@
 #include <FEXCore/fextl/vector.h>
 
 #include <cstdint>
-#include <elf.h>
+#include <FEXHeaderUtils/elf.h>
 #include <functional>
 #include <stddef.h>
 #include <utility>

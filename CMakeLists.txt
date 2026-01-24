@@ -53,7 +53,7 @@ if (NOT HOSTLIBS_DATA_DIRECTORY)
 endif()
 
 ## Platform Checks ##
-# Only 64-bit Linux and Windows are supported
+# Only 64-bit Linux, Windows, and macOS are supported
 
 # NB: SIZEOF_VOID_P is in bytes, not bits
 # On 32-bit systems this is set to 4
@@ -61,10 +61,22 @@ if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "Unsupported pointer size ${CMAKE_SIZEOF_VOID_P}."
     " FEX only supports 64-bit (8-byte pointer) systems."
     " If you believe this is in error, file an issue.")
-elseif (NOT (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+elseif (NOT (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin"))
   message(FATAL_ERROR "Unsupported system type ${CMAKE_SYSTEM_NAME}."
-    " FEX only supports Linux and Windows."
+    " FEX only supports Linux, Windows, and macOS."
     " If you believe this is in error, file an issue.")
+endif()
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set(_FEX_PLATFORM_MACOS TRUE)
+  add_definitions(-D_FEX_PLATFORM_MACOS=1)
+  message(STATUS "Building for macOS")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(_FEX_PLATFORM_LINUX TRUE)
+  add_definitions(-D_FEX_PLATFORM_LINUX=1)
+elseif (WIN32)
+  set(_FEX_PLATFORM_WINDOWS TRUE)
+  add_definitions(-D_FEX_PLATFORM_WINDOWS=1)
 endif()
 
 ## Compiler Checks ##
@@ -296,12 +308,12 @@ if (ENABLE_COVERAGE)
   link_libraries(-fprofile-instr-generate -fcoverage-mapping)
 endif()
 
-if (ENABLE_JEMALLOC_GLIBC_ALLOC)
+if (ENABLE_JEMALLOC_GLIBC_ALLOC AND _FEX_PLATFORM_LINUX)
   # The glibc jemalloc subproject which hooks the glibc allocator.
   # Required for thunks to work.
   # All host native libraries will use this allocator, while *most* other FEX internal allocations will use the other jemalloc allocator.
   add_subdirectory(External/jemalloc_glibc/)
-elseif (NOT MINGW)
+elseif (_FEX_PLATFORM_LINUX AND NOT MINGW)
   message(STATUS
     " jemalloc glibc allocator disabled!\n"
     " This is not a recommended configuration!\n"
@@ -309,9 +321,15 @@ elseif (NOT MINGW)
     " Use at your own risk!")
 endif()
 
-if (ENABLE_JEMALLOC)
+if (ENABLE_JEMALLOC AND NOT _FEX_PLATFORM_MACOS)
   # The jemalloc subproject that all FEXCore fextl objects allocate through.
   add_subdirectory(External/jemalloc/)
+elseif (_FEX_PLATFORM_MACOS)
+  message(STATUS
+    " jemalloc disabled on macOS.\n"
+    " Using system allocator instead.")
+  set(ENABLE_JEMALLOC FALSE)
+  set(ENABLE_JEMALLOC_GLIBC_ALLOC FALSE)
 elseif (NOT MINGW)
   message(STATUS
     " jemalloc disabled!\n"
@@ -454,7 +472,14 @@ endif()
 
 if (TUNE_CPU STREQUAL "native")
   if(ARCHITECTURE_arm64)
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 999999.0)
+    if (_FEX_PLATFORM_MACOS)
+      # TODO(alpin)
+      check_cxx_compiler_flag("-mcpu=apple-m1" COMPILER_SUPPORTS_APPLE_M1)
+      if(COMPILER_SUPPORTS_APPLE_M1)
+        list(APPEND FEX_TUNE_COMPILE_FLAGS "-mcpu=apple-m1")
+        message(STATUS "Using Apple M1 CPU target")
+      endif()
+    elseif (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 999999.0)
       # Clang 12.0 fixed the -mcpu=native bug with mixed big.little implementers
       # Clang can not currently check for native Apple M1 type in hypervisor. Currently disabled
       check_cxx_compiler_flag("-mcpu=native" COMPILER_SUPPORTS_CPU_TYPE)
@@ -556,8 +581,8 @@ add_subdirectory(FEXHeaderUtils/)
 add_subdirectory(CodeEmitter/)
 add_subdirectory(FEXCore/)
 
-if (ARCHITECTURE_arm64 AND NOT MINGW AND NOT BUILD_STEAM_SUPPORT)
-  # Binfmt_misc files must be installed prior to Source/ installs
+if (ARCHITECTURE_arm64 AND NOT MINGW AND NOT BUILD_STEAM_SUPPORT AND _FEX_PLATFORM_LINUX)
+  # Binfmt_misc files must be installed prior to Source/ installs (Linux only)
   add_subdirectory(Data/binfmts/)
 endif()
 

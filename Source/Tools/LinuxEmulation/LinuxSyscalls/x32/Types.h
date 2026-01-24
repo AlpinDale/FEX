@@ -9,29 +9,112 @@ $end_info$
 
 #include <FEXCore/Utils/CompilerDefs.h>
 
+// Include LinuxCompat.h early on macOS to define compatibility macros
+// before other headers that use them (e.g., sys/stat.h timespec field names)
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
+
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <fcntl.h>
+#include <limits>
+#include <signal.h>
+#include <sys/resource.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#ifndef __APPLE__
+#include <sys/statfs.h>
+#endif
+#include <sys/times.h>
+#include <sys/uio.h>
+#include <time.h>
+#include <type_traits>
+#include <utime.h>
+
+#ifdef __APPLE__
+
+// IPC structures are defined in LinuxCompat.h (included above)
+// This section contains only additional structures not in LinuxCompat.h
+
+struct shmid64_ds {
+  struct ipc64_perm shm_perm;
+  __kernel_size_t shm_segsz;
+  int64_t shm_atime;
+  int64_t shm_dtime;
+  int64_t shm_ctime;
+  __kernel_pid_t shm_cpid;
+  __kernel_pid_t shm_lpid;
+  __kernel_ulong_t shm_nattch;
+  __kernel_ulong_t __unused4;
+  __kernel_ulong_t __unused5;
+};
+
+struct msqid64_ds {
+  struct ipc64_perm msg_perm;
+  int64_t msg_stime;
+  int64_t msg_rtime;
+  int64_t msg_ctime;
+  __kernel_ulong_t msg_cbytes;
+  __kernel_ulong_t msg_qnum;
+  __kernel_ulong_t msg_qbytes;
+  __kernel_pid_t msg_lspid;
+  __kernel_pid_t msg_lrpid;
+  __kernel_ulong_t __unused4;
+  __kernel_ulong_t __unused5;
+};
+
+struct shminfo {
+  __kernel_ulong_t shmmax;
+  __kernel_ulong_t shmmin;
+  __kernel_ulong_t shmmni;
+  __kernel_ulong_t shmseg;
+  __kernel_ulong_t shmall;
+};
+
+struct shm_info {
+  int used_ids;
+  __kernel_ulong_t shm_tot;
+  __kernel_ulong_t shm_rss;
+  __kernel_ulong_t shm_swp;
+  __kernel_ulong_t swap_attempts;
+  __kernel_ulong_t swap_successes;
+};
+
+// mq_attr for macOS
+struct mq_attr {
+  long mq_flags;
+  long mq_maxmsg;
+  long mq_msgsize;
+  long mq_curmsgs;
+  long __reserved[4];
+};
+
+// timex structure for macOS - defined in LinuxCompat.h
+// (using FEX_TIMEX_DEFINED guard)
+
+// itimerspec for macOS
+struct itimerspec {
+  struct timespec it_interval;
+  struct timespec it_value;
+};
+
+// SIGEV constants
+#ifndef SIGEV_THREAD_ID
+#define SIGEV_THREAD_ID 4
+#endif
+
+#else
 #include <linux/types.h>
 #include <asm/ipcbuf.h>
 #include <asm/msgbuf.h>
 #include <asm/sembuf.h>
 #include <asm/shmbuf.h>
-#include <cstdint>
-#include <cstring>
-#include <fcntl.h>
-#include <limits>
 #include <linux/mqueue.h>
-#include <signal.h>
-#include <sys/resource.h>
 #include <sys/shm.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/statfs.h>
-#include <sys/times.h>
 #include <sys/timex.h>
-#include <sys/uio.h>
-#include <time.h>
-#include <type_traits>
-#include <utime.h>
+#endif
 
 #include "LinuxSyscalls/Types.h"
 
@@ -350,7 +433,11 @@ struct
 
     COPY(st_size);
 
+#ifdef __APPLE__
+    st_atime_ = host.st_atimespec.tv_sec;
+#else
     st_atime_ = host.st_atim.tv_sec;
+#endif
     st_mtime_ = host.st_mtime;
     st_ctime_ = host.st_ctime;
 #undef COPY
@@ -403,6 +490,16 @@ struct
     COPY(st_blksize);
     COPY(st_blocks);
 
+#ifdef __APPLE__
+    st_atime_ = host.st_atimespec.tv_sec;
+    fex_st_atime_nsec = host.st_atimespec.tv_nsec;
+
+    st_mtime_ = host.st_mtime;
+    fex_st_mtime_nsec = host.st_mtimespec.tv_nsec;
+
+    st_ctime_ = host.st_ctime;
+    fex_st_ctime_nsec = host.st_ctimespec.tv_nsec;
+#else
     st_atime_ = host.st_atim.tv_sec;
     fex_st_atime_nsec = host.st_atim.tv_nsec;
 
@@ -411,6 +508,7 @@ struct
 
     st_ctime_ = host.st_ctime;
     fex_st_ctime_nsec = host.st_ctim.tv_nsec;
+#endif
 #undef COPY
     __pad1 = __pad2 = __unused4 = __unused5 = 0;
   }
@@ -464,6 +562,16 @@ struct
 
     __st_ino = host.st_ino;
 
+#ifdef __APPLE__
+    st_atime_ = host.st_atimespec.tv_sec;
+    fex_st_atime_nsec = host.st_atimespec.tv_nsec;
+
+    st_mtime_ = host.st_mtime;
+    fex_st_mtime_nsec = host.st_mtimespec.tv_nsec;
+
+    st_ctime_ = host.st_ctime;
+    fex_st_ctime_nsec = host.st_ctimespec.tv_nsec;
+#else
     st_atime_ = host.st_atim.tv_sec;
     fex_st_atime_nsec = host.st_atim.tv_nsec;
 
@@ -472,10 +580,11 @@ struct
 
     st_ctime_ = host.st_ctime;
     fex_st_ctime_nsec = host.st_ctim.tv_nsec;
+#endif
 #undef COPY
   }
 
-#ifndef stat64
+#if !defined(stat64) && !defined(__APPLE__)
   stat64_32(const struct stat64& host) {
 #define COPY(x) x = host.x
     COPY(st_dev);
@@ -533,15 +642,21 @@ struct FEX_PACKED FEX_ALIGNED(4) FEX_ANNOTATE("alias-x86_32-statfs64") FEX_ANNOT
     COPY(f_bavail);
     COPY(f_files);
     COPY(f_ffree);
+#ifdef __APPLE__
+    f_namelen = 255; // NAME_MAX
+    f_frsize = host.f_bsize;
+    f_flags = host.f_flags;
+#else
     COPY(f_namelen);
     COPY(f_frsize);
     COPY(f_flags);
+#endif
 
     memcpy(&f_fsid, &host.f_fsid, sizeof(f_fsid));
 #undef COPY
   }
 
-#ifndef statfs64
+#if !defined(statfs64) && !defined(__APPLE__)
   statfs64_32(const struct statfs64& host) {
 #define COPY(x) x = host.x
     COPY(f_type);
@@ -588,15 +703,21 @@ struct FEX_ANNOTATE("alias-x86_32-statfs") FEX_ANNOTATE("fex-match") statfs32_32
     COPY(f_bavail);
     COPY(f_files);
     COPY(f_ffree);
+#ifdef __APPLE__
+    f_namelen = 255; // NAME_MAX
+    f_frsize = host.f_bsize;
+    f_flags = host.f_flags;
+#else
     COPY(f_namelen);
     COPY(f_frsize);
     COPY(f_flags);
+#endif
 
     memcpy(&f_fsid, &host.f_fsid, sizeof(f_fsid));
 #undef COPY
   }
 
-#ifndef statfs64
+#if !defined(statfs64) && !defined(__APPLE__)
   statfs32_32(struct statfs64 host) {
 #define COPY(x) x = host.x
     COPY(f_type);
@@ -1145,12 +1266,14 @@ struct FEX_ANNOTATE("fex-match") sigevent32 {
     val.sigev_signo = sigev_signo;
     val.sigev_notify = sigev_notify;
 
+#ifndef __APPLE__
     if (sigev_notify == SIGEV_THREAD_ID) {
       val.sigev_notify_thread_id = _sigev_un._tid;
     } else if (sigev_notify == SIGEV_THREAD) {
       val.sigev_notify_function = reinterpret_cast<void (*)(sigval)>(_sigev_un._sigev_thread._function);
       val.sigev_notify_attributes = reinterpret_cast<pthread_attr_t*>(_sigev_un._sigev_thread._attribute);
     }
+#endif
     return val;
   }
 
@@ -1159,12 +1282,14 @@ struct FEX_ANNOTATE("fex-match") sigevent32 {
     sigev_signo = val.sigev_signo;
     sigev_notify = val.sigev_notify;
 
+#ifndef __APPLE__
     if (sigev_notify == SIGEV_THREAD_ID) {
       _sigev_un._tid = val.sigev_notify_thread_id;
     } else if (sigev_notify == SIGEV_THREAD) {
       _sigev_un._sigev_thread._function = static_cast<uint32_t>(reinterpret_cast<uint64_t>(val.sigev_notify_function));
       _sigev_un._sigev_thread._attribute = static_cast<uint32_t>(reinterpret_cast<uint64_t>(val.sigev_notify_attributes));
     }
+#endif
   }
 };
 

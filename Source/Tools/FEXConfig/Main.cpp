@@ -17,7 +17,32 @@
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 
+#ifdef __APPLE__
+#define IN_CLOSE_WRITE 0x00000008
+#define IN_DELETE 0x00000200
+#define IN_CREATE 0x00000100
+#define IN_NONBLOCK 0x00004000
+#define IN_CLOEXEC 0x02000000
+struct inotify_event {
+  int wd;
+  uint32_t mask;
+  uint32_t cookie;
+  uint32_t len;
+  char name[];
+};
+static inline int inotify_init1(int flags) {
+  (void)flags;
+  return -1;
+}
+static inline int inotify_add_watch(int fd, const char* pathname, uint32_t mask) {
+  (void)fd;
+  (void)pathname;
+  (void)mask;
+  return -1;
+}
+#else
 #include <sys/inotify.h>
+#endif
 #include <poll.h>
 
 #include <charconv>

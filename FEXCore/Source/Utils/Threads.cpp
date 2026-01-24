@@ -6,8 +6,11 @@
 #include <pthread.h>
 #include <unistd.h>
 #ifndef _WIN32
+#include <signal.h>
 #include <sys/signal.h>
+#ifndef __APPLE__
 #include <sys/syscall.h>
+#endif
 #endif
 
 namespace FEXCore::Threads {
@@ -37,19 +40,39 @@ void FEXCore::Threads::Thread::SetInternalPointers(const Pointers& _Ptrs) {
 }
 
 uint64_t SetSignalMask(uint64_t Mask) {
-#ifndef _WIN32
+#if defined(_WIN32)
+  return 0;
+#elif defined(__APPLE__)
+  sigset_t NewMask, OldMask;
+  sigemptyset(&NewMask);
+  // Convert the 64-bit mask to sigset_t
+  for (int i = 1; i < 64; ++i) {
+    if (Mask & (1ULL << i)) {
+      sigaddset(&NewMask, i);
+    }
+  }
+  ::sigprocmask(SIG_SETMASK, &NewMask, &OldMask);
+  // Convert OldMask back to uint64_t
+  uint64_t Result = 0;
+  for (int i = 1; i < 64; ++i) {
+    if (sigismember(&OldMask, i)) {
+      Result |= (1ULL << i);
+    }
+  }
+  return Result;
+#else
   ::syscall(SYS_rt_sigprocmask, SIG_SETMASK, &Mask, &Mask, 8);
   return Mask;
-#else
-  return 0;
 #endif
 }
 
 void SetThreadName(const char* name) {
-#ifndef _WIN32
-  pthread_setname_np(pthread_self(), name);
-#else
+#if defined(_WIN32)
   // TODO:
+#elif defined(__APPLE__)
+  pthread_setname_np(name);
+#else
+  pthread_setname_np(pthread_self(), name);
 #endif
 }
 } // namespace FEXCore::Threads

@@ -13,7 +13,11 @@ $end_info$
 #include "LinuxSyscalls/x64/Syscalls.h"
 
 #include <stdint.h>
+#ifdef __APPLE__
+#include <sys/syscall.h>
+#else
 #include <syscall.h>
+#endif
 #include <sys/time.h>
 #include <unistd.h>
 

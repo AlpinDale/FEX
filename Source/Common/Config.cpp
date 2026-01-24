@@ -15,7 +15,7 @@
 #include <fmt/format.h>
 #include <functional>
 #ifndef _WIN32
-#include <linux/limits.h>
+#include <FEXHeaderUtils/Platform.h>
 #include <pwd.h>
 #endif
 #include <optional>

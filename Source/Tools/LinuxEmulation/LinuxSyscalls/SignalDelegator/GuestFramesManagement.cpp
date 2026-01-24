@@ -8,6 +8,10 @@ $end_info$
 
 #include "LinuxSyscalls/SignalDelegator.h"
 
+#ifdef __APPLE__
+#include "LinuxSyscalls/LinuxCompat.h"
+#endif
+
 #include <FEXCore/Core/Context.h>
 #include <FEXCore/Core/SignalDelegator.h>
 #include <FEXCore/Debug/InternalThreadState.h>
@@ -761,13 +765,25 @@ uint64_t SignalDelegator::SetupRTFrame_ia32(FEXCore::Core::InternalThreadState* 
     guest_uctx->info._sifields._kill.uid = HostSigInfo->si_uid;
     break;
   case SigInfoLayout::LAYOUT_TIMER:
+#ifdef __APPLE__
+    // macOS siginfo_t doesn't have si_timerid, si_overrun, si_int fields
+    // These signals would need to be emulated differently on macOS
+    guest_uctx->info._sifields._timer.tid = 0;
+    guest_uctx->info._sifields._timer.overrun = 0;
+    guest_uctx->info._sifields._timer.sigval.sival_int = 0;
+#else
     guest_uctx->info._sifields._timer.tid = HostSigInfo->si_timerid;
     guest_uctx->info._sifields._timer.overrun = HostSigInfo->si_overrun;
     guest_uctx->info._sifields._timer.sigval.sival_int = HostSigInfo->si_int;
+#endif
     break;
-  case SigInfoLayout::LAYOUT_POLL:
-    guest_uctx->info._sifields._poll.band = HostSigInfo->si_band;
+  case SigInfoLayout::LAYOUT_POLL: guest_uctx->info._sifields._poll.band = HostSigInfo->si_band;
+#ifdef __APPLE__
+    // macOS siginfo_t doesn't have si_fd field
+    guest_uctx->info._sifields._poll.fd = 0;
+#else
     guest_uctx->info._sifields._poll.fd = HostSigInfo->si_fd;
+#endif
     break;
   case SigInfoLayout::LAYOUT_FAULT:
     // Macro expansion to get the si_addr
@@ -783,17 +799,34 @@ uint64_t SignalDelegator::SetupRTFrame_ia32(FEXCore::Core::InternalThreadState* 
     guest_uctx->info._sifields._sigchld.pid = HostSigInfo->si_pid;
     guest_uctx->info._sifields._sigchld.uid = HostSigInfo->si_uid;
     guest_uctx->info._sifields._sigchld.status = HostSigInfo->si_status;
+#ifdef __APPLE__
+    // macOS siginfo_t doesn't have si_utime, si_stime fields
+    guest_uctx->info._sifields._sigchld.utime = 0;
+    guest_uctx->info._sifields._sigchld.stime = 0;
+#else
     guest_uctx->info._sifields._sigchld.utime = HostSigInfo->si_utime;
     guest_uctx->info._sifields._sigchld.stime = HostSigInfo->si_stime;
+#endif
     break;
   case SigInfoLayout::LAYOUT_RT:
     guest_uctx->info._sifields._rt.pid = HostSigInfo->si_pid;
     guest_uctx->info._sifields._rt.uid = HostSigInfo->si_uid;
+#ifdef __APPLE__
+    // macOS siginfo_t doesn't have si_int field
+    guest_uctx->info._sifields._rt.sigval.sival_int = 0;
+#else
     guest_uctx->info._sifields._rt.sigval.sival_int = HostSigInfo->si_int;
+#endif
     break;
   case SigInfoLayout::LAYOUT_SYS:
+#ifdef __APPLE__
+    // macOS siginfo_t doesn't have si_call_addr, si_syscall fields
+    guest_uctx->info._sifields._sigsys.call_addr = 0;
+    guest_uctx->info._sifields._sigsys.syscall = 0;
+#else
     guest_uctx->info._sifields._sigsys.call_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(HostSigInfo->si_call_addr));
     guest_uctx->info._sifields._sigsys.syscall = HostSigInfo->si_syscall;
+#endif
     // We need to lie about the architecture here.
     // Otherwise we would expose incorrect information to the guest.
     constexpr uint32_t AUDIT_LE = 0x4000'0000U;

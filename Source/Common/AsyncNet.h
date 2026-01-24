@@ -5,9 +5,16 @@
 #pragma once
 
 #include <Common/Async.h>
+#include <fcntl.h>
 
 #include <sys/socket.h>
 #include <sys/un.h>
+
+// SOCK_CLOEXEC is Linux-specific
+#ifndef SOCK_CLOEXEC
+#define SOCK_CLOEXEC 0
+#define FEX_NEED_MANUAL_CLOEXEC 1
+#endif
 
 namespace fasio {
 
@@ -208,6 +215,9 @@ struct tcp_acceptor {
     if (FD == -1) {
       return {};
     }
+#ifdef FEX_NEED_MANUAL_CLOEXEC
+    fcntl(FD, F_SETFD, FD_CLOEXEC);
+#endif
 
     sockaddr_un addr {};
     addr.sun_family = AF_UNIX;
